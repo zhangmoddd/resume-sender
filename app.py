@@ -13,6 +13,8 @@ import os
 import shutil
 import smtplib
 import socket
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -349,6 +351,68 @@ def render_image_page(path):
 
     # 用页面宽度反推 DPI，让 PDF 里的页面尺寸正好等于 A4（避免取整误差）
     return canvas, cw * 72.0 / pw
+
+
+_GUI_PY = {"exe": None}
+
+
+def find_gui_python():
+    """找一个同时装了 tkinter 和 pypdf 的 Python，用来跑独立合并工具。
+
+    坑：本软件自己跑在精简环境里，那个 Python 只有 pypdf、没有 tkinter，
+    所以不能直接用 sys.executable（会报 No module named 'tkinter'，窗口根本开不出来）。
+    这里按顺序挨个试，逻辑和「合并PDF.bat」保持一致，探测结果缓存起来。
+    """
+    if _GUI_PY["exe"]:
+        return _GUI_PY["exe"]
+
+    here = sys.executable or ""
+    cands = []
+    for c in (
+        os.path.join(os.path.dirname(here), "pythonw.exe") if here else "",
+        here,
+        "pythonw",
+        "python",
+    ):
+        if c and c not in cands:
+            cands.append(c)
+
+    flags = 0x08000000 if os.name == "nt" else 0
+    for exe in cands:
+        try:
+            r = subprocess.run([exe, "-c", "import tkinter, pypdf"],
+                               capture_output=True, timeout=25, creationflags=flags)
+        except Exception:
+            continue
+        if r.returncode == 0:
+            _GUI_PY["exe"] = exe
+            return exe
+    return None
+
+
+def open_merge_tool(out_name=""):
+    """把独立的「PDF / 图片 合并工具」作为单独窗口打开。
+
+    它功能比网页版全（预览每一页、单张旋转、逐张调页面大小），所以主推这个。
+    通过 --outdir 告诉它默认存到附件库，合完的 PDF 直接就能勾选发送。
+    """
+    script = os.path.join(BASE, "pdf_merge_gui.py")
+    if not os.path.isfile(script):
+        raise ValueError("找不到独立合并工具 pdf_merge_gui.py，请确认它还在软件目录里")
+
+    exe = find_gui_python()
+    if not exe:
+        raise ValueError("没找到能开窗口的 Python（需要同时装了 tkinter 和 pypdf）。"
+                         "可以双击软件目录里的「合并PDF.bat」手动打开。")
+
+    cmd = [exe, script, "--outdir", ATTACH_DIR]
+    if out_name:
+        cmd += ["--outname", safe_fname(out_name)]
+    kwargs = {"cwd": BASE}
+    if os.name == "nt":
+        # 不额外弹一个黑色控制台窗口（工具自己的窗口照常显示）
+        kwargs["creationflags"] = 0x08000000
+    subprocess.Popen(cmd, **kwargs)
 
 
 def merge_run(out_name):
@@ -908,6 +972,13 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/merge/clear":
                 merge_clear()
                 self._json({"ok": True, "files": merge_list()})
+            elif path == "/api/merge/open-tool":
+                try:
+                    open_merge_tool(str(body.get("name", "")))
+                except ValueError as e:
+                    self._json({"ok": False, "error": str(e)})
+                    return
+                self._json({"ok": True})
             elif path == "/api/merge/run":
                 try:
                     out, pages, size = merge_run(str(body.get("name", "")))

@@ -121,6 +121,14 @@
   .merge-foot .field { flex: 1 1 260px; margin: 0; }
   .merge-sum { font-size: 13px; color: #374151; margin-top: 10px; }
   .merge-sum b { color: #185fa5; }
+  .primary-act { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; background: #f4f8fd; border: 1px solid #cfe3f7; border-radius: 12px; padding: 16px 18px; margin: 14px 0 4px; }
+  .primary-act .txt { flex: 1 1 320px; }
+  .primary-act .txt b { font-size: 14px; color: #0c447c; }
+  .primary-act .txt .hint { margin-top: 5px; }
+  details.fold { margin-top: 16px; border-top: 1px dashed #e5e7eb; padding-top: 14px; }
+  details.fold > summary { cursor: pointer; font-size: 13px; color: #185fa5; user-select: none; }
+  details.fold > summary:hover { text-decoration: underline; }
+  details.fold[open] > summary { margin-bottom: 12px; }
   /* 教程 */
   .steps { counter-reset: step; }
   .step { display: flex; gap: 14px; padding: 12px 0; border-bottom: 1px dashed #f0f1f3; }
@@ -304,33 +312,49 @@
   <section id="tab-merge" class="tabpane">
     <div class="card">
       <h2>把证明材料合成一个 PDF</h2>
-      <p class="hint" style="line-height:1.9; margin-bottom:12px;">
+      <p class="hint" style="line-height:1.9;">
         <b style="color:#374151">这里只放「简历之外」的材料</b>：学籍证明、成绩排名、证书、推荐表……
         它们合成一份 PDF 之后，再加上你单独的简历 PDF，一封邮件里就<b>只有两个附件</b>——
         HR 不用下十几次、不用解压、不用一个个点开。<br>
         顺带解决手机照片发不出去的问题：手机拍一张证书 3~5MB，十张就 40MB 以上，邮件根本发不出去。
-        合成时会自动把照片摆正、按 A4 铺好、压到 144dpi，10 页大约 2~3MB。
+        合并后一张照片就是一页 A4，10 页大约 2~3MB。
       </p>
-      <input type="file" id="mergeInput" multiple accept=".pdf,.jpg,.jpeg,.png,.bmp,.webp,.gif,.tif,.tiff" style="margin-bottom:10px;">
-      <div class="toolbar" style="margin-bottom:0;">
-        <button class="btn primary" onclick="addMergeFiles()">＋ 添加文件</button>
-        <button class="btn" onclick="clearMerge()">清空列表</button>
-        <span class="spacer"></span>
-        <span class="hint">列表顺序 = 合成后 PDF 的页序，用 ↑ ↓ 调</span>
-      </div>
-      <div class="merge-list" id="mergeList"></div>
-      <div class="merge-sum" id="mergeSum"></div>
-      <div class="merge-foot">
-        <div class="field">
-          <label>合成后的文件名</label>
-          <input id="mergeOutName" placeholder="例如：张三-证明材料.pdf">
+
+      <div class="primary-act">
+        <div class="txt">
+          <b>推荐：打开「合并工具」独立窗口</b>
+          <div class="hint">功能最全 —— 每一页都能预览、单张能旋转、能逐张改页面大小和缩放方式。<br>
+            保存时默认就落在附件库，合完回本页点一下「刷新附件库」，勾上就能发。</div>
         </div>
-        <button class="btn primary big" onclick="runMerge()">📄 合成 PDF</button>
+        <button class="btn primary big" onclick="openMergeTool()">🪟 打开合并工具</button>
+        <button class="btn" onclick="refreshAtts()">🔄 刷新附件库</button>
       </div>
-      <div class="okbox" style="margin-top:16px;">
-        ✅ 合成好的文件会直接出现在「发送设置」的附件库里，回那儿勾上就能发。<br>
-        💡 顺序建议按「重要程度」排：最想让 HR 看到的放最前面（一般是学籍证明、成绩排名）。
-      </div>
+
+      <details class="fold">
+        <summary>或者：在网页里直接合成（懒人版，不用调方向和页面大小）</summary>
+        <div class="fold-body">
+          <input type="file" id="mergeInput" multiple accept=".pdf,.jpg,.jpeg,.png,.bmp,.webp,.gif,.tif,.tiff" style="margin-bottom:10px;">
+          <div class="toolbar" style="margin-bottom:0;">
+            <button class="btn primary" onclick="addMergeFiles()">＋ 添加文件</button>
+            <button class="btn" onclick="clearMerge()">清空列表</button>
+            <span class="spacer"></span>
+            <span class="hint">列表顺序 = 合成后 PDF 的页序，用 ↑ ↓ 调</span>
+          </div>
+          <div class="merge-list" id="mergeList"></div>
+          <div class="merge-sum" id="mergeSum"></div>
+          <div class="merge-foot">
+            <div class="field">
+              <label>合成后的文件名</label>
+              <input id="mergeOutName" placeholder="例如：张三-证明材料.pdf">
+            </div>
+            <button class="btn primary big" onclick="runMerge()">📄 合成 PDF</button>
+          </div>
+          <div class="okbox" style="margin-top:16px;">
+            ✅ 合成好的文件会直接出现在「发送设置」的附件库里，回那儿勾上就能发。<br>
+            💡 顺序建议按「重要程度」排：最想让 HR 看到的放最前面（一般是学籍证明、成绩排名）。
+          </div>
+        </div>
+      </details>
     </div>
   </section>
 
@@ -476,8 +500,19 @@ function toast(msg, ok = true) {
 async function api(path, body) {
   const opt = body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {};
   const r = await fetch(path, opt);
-  return await r.json();
+  const text = await r.text();
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    // 后端返回的不是 JSON：最常见的原因是软件还是旧版本在跑（新接口不存在）
+    throw new Error(`软件后端没有响应「${path}」。多半是程序还是旧版本 —— 关掉启动时的黑色窗口，重新双击 Start.bat 再试。`);
+  }
 }
+// 任何没被接住的错误都弹出来，不要静默失败
+window.addEventListener("unhandledrejection", e => {
+  const m = (e.reason && e.reason.message) ? e.reason.message : "操作失败了，请重启软件再试";
+  toast(m, false);
+});
 
 /* ---------- tabs ---------- */
 document.querySelectorAll("#nav button").forEach(b => b.onclick = () => {
@@ -763,6 +798,18 @@ async function delAtt(btn) {
 }
 
 /* ---------- 材料合并 ---------- */
+async function openMergeTool() {
+  const suggest = (CONFIG.name ? CONFIG.name + "-证明材料" : "证明材料") + ".pdf";
+  try {
+    const r = await api("/api/merge/open-tool", { name: suggest });
+    if (!r.ok) return toast(r.error, false);
+    toast("合并工具窗口已打开：加文件 → 排顺序 → 「合并并保存」，存完回这里点「刷新附件库」");
+  } catch (e) { toast(e.message, false); }
+}
+async function refreshAtts() {
+  await loadState();
+  toast("附件库已刷新");
+}
 function fmtSize(n) {
   return n >= 1024 * 1024 ? (n / 1024 / 1024).toFixed(1) + " MB" : (n / 1024).toFixed(0) + " KB";
 }

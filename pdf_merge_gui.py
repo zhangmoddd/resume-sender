@@ -641,8 +641,12 @@ class PreviewDialog(tk.Toplevel):
 
 # ==================== 主窗口 ====================
 class MergeApp:
-    def __init__(self, root):
+    def __init__(self, root, out_dir=None, out_name=None):
         self.root = root
+        # 从「简历批量投递助手」里打开时，会把附件库目录传进来，
+        # 这样保存对话框直接落在附件库，合完就能勾选发送。
+        self.out_dir = out_dir if (out_dir and os.path.isdir(out_dir)) else None
+        self.out_name = out_name or ""
         self.entries = []      # 路径列表。顺序 = 合并顺序
         self.meta = {}         # 路径 -> dict(kind, c1, c2, c3)
         self.img_opts = {}     # 图片路径 -> dict(rotate, page, fit)
@@ -650,7 +654,7 @@ class MergeApp:
         self.busy = False
         self.merge_queue = queue.Queue()
 
-        root.title(APP_TITLE)
+        root.title(APP_TITLE + ("　—　保存到投递助手的附件库" if self.out_dir else ""))
         root.minsize(640, 460)
         self._center(780, 580)
 
@@ -947,10 +951,14 @@ class MergeApp:
                 return
 
         first = self.entries[0]
+        if self.out_name:
+            default_name = os.path.splitext(os.path.basename(self.out_name))[0]
+        else:
+            default_name = os.path.splitext(os.path.basename(first))[0] + "-合并"
         out = filedialog.asksaveasfilename(
             title="合并后的 PDF 存到哪",
-            initialdir=os.path.dirname(first),
-            initialfile=os.path.splitext(os.path.basename(first))[0] + "-合并.pdf",
+            initialdir=self.out_dir or os.path.dirname(first),
+            initialfile=default_name + ".pdf",
             defaultextension=".pdf",
             filetypes=[("PDF 文件", "*.pdf")],
         )
@@ -1056,11 +1064,29 @@ class MergeApp:
 
 
 def main():
-    root = tk.Tk()
-    app = MergeApp(root)
+    # 命令行参数：--outdir / --outname 由「简历批量投递助手」传入；
+    # 其余参数当作要预加载的文件（支持把文件拖到 bat 图标上打开）。
+    out_dir = None
+    out_name = None
+    files = []
+    args = list(sys.argv[1:])
+    i = 0
+    while i < len(args):
+        if args[i] == "--outdir" and i + 1 < len(args):
+            out_dir = args[i + 1]
+            i += 2
+            continue
+        if args[i] == "--outname" and i + 1 < len(args):
+            out_name = args[i + 1]
+            i += 2
+            continue
+        files.append(args[i])
+        i += 1
 
-    # 支持把文件直接拖到 bat 图标上打开
-    for p in sys.argv[1:]:
+    root = tk.Tk()
+    app = MergeApp(root, out_dir=out_dir, out_name=out_name)
+
+    for p in files:
         if os.path.isfile(p):
             app._add_one(p)
     app._refresh_status()

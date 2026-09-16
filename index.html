@@ -14,7 +14,7 @@
   nav { display: flex; gap: 4px; padding: 10px 28px 0; }
   nav button { border: none; background: transparent; padding: 10px 18px; font-size: 14px; color: #6b7280; cursor: pointer; border-radius: 10px 10px 0 0; }
   nav button.active { background: #fff; color: #0c447c; font-weight: 600; box-shadow: 0 -2px 0 #185fa5 inset; }
-  main { padding: 18px 28px 60px; max-width: 1180px; margin: 0 auto; }
+  main { padding: 18px 28px 60px; max-width: 1280px; margin: 0 auto; }
   .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 18px; margin-bottom: 16px; }
   .card h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; color: #1f2937; }
   .hint { font-size: 12px; color: #9ca3af; line-height: 1.7; }
@@ -171,6 +171,16 @@
   .lnk:hover { text-decoration: underline; }
   .att-item .att-ops { flex: none; display: flex; gap: 6px; }
   .att-check .att-pv { flex: none; align-self: center; }
+  /* 投递定位：清单里一条用哪套话术 */
+  .tpl-select { border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; padding: 2px 4px;
+                background: #fff; max-width: 100px; }
+  .tpl-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 14px;
+             background: #f4f8fd; border: 1px solid #cfe3f7; border-radius: 10px; padding: 8px 12px; }
+  .tpl-bar .tb-label { font-size: 12px; color: #6b7280; white-space: nowrap; }
+  .tpl-bar select { border: 1px solid #d1d5db; border-radius: 8px; padding: 5px 8px; font-size: 13px;
+                    font-family: inherit; background: #fff; max-width: 240px; }
+  .tpl-bar .dft { font-size: 11px; color: #185fa5; background: #e6f1fb; border-radius: 20px;
+                  padding: 1px 8px; white-space: nowrap; }
   /* 投递记录弹窗 */
   .hist .hrow { padding: 10px 0; border-bottom: 1px dashed #f0f1f3; font-size: 13px; line-height: 1.9; }
   .hist .hrow:last-child { border-bottom: none; }
@@ -296,17 +306,18 @@
       <div style="overflow:auto; max-height: 420px; border:1px solid #f0f1f3; border-radius:10px;">
         <table>
           <thead><tr>
-            <th style="width:36px;"><input type="checkbox" id="checkAll" onchange="toggleAll(this)"></th>
-            <th style="width:132px;">公司</th>
-            <th style="width:112px;">岗位</th>
-            <th style="width:164px;">收件邮箱</th>
-            <th>备注</th>
-            <th style="width:132px;">标签</th>
-            <th style="width:104px;">我的进展</th>
-            <th style="width:76px;">定制</th>
-            <th style="width:78px;">状态</th>
-            <th style="width:116px;">发送时间</th>
-            <th style="width:92px;">操作</th>
+            <th style="width:34px;"><input type="checkbox" id="checkAll" onchange="toggleAll(this)"></th>
+            <th style="width:110px;">公司</th>
+            <th style="width:94px;">岗位</th>
+            <th style="width:138px;">收件邮箱</th>
+            <th style="width:118px;">备注</th>
+            <th style="width:104px;">标签</th>
+            <th style="width:88px;">我的进展</th>
+            <th style="width:92px;">投递定位</th>
+            <th style="width:68px;">定制</th>
+            <th style="width:76px;">状态</th>
+            <th style="width:96px;">发送时间</th>
+            <th style="width:74px;">操作</th>
           </tr></thead>
           <tbody id="jobRows"></tbody>
         </table>
@@ -361,14 +372,23 @@
   <section id="tab-tpl" class="tabpane">
     <div class="grid">
       <div class="card">
-        <h2>邮件主题与正文（写一次，全部自动替换）</h2>
+        <h2>邮件主题与正文 <span class="hint" style="font-weight:400;">（可以存好几套话术：一套投 AI 岗、一套投专业对口岗…）</span></h2>
+        <div class="tpl-bar">
+          <span class="tb-label">投递定位</span>
+          <select id="tplPick" onchange="switchTemplate(this.value)"></select>
+          <span class="dft" id="tplDftTag" style="display:none;">★ 默认</span>
+          <button class="btn" style="padding:5px 12px;" onclick="addTemplate()">＋ 新建一套</button>
+          <button class="lnk" onclick="renameTemplate()">✎ 改名</button>
+          <button class="lnk" onclick="setDefaultTemplate()">★ 设为默认</button>
+          <button class="lnk" style="color:#a32d2d;" onclick="delTemplate()">删除这套</button>
+        </div>
         <div class="field">
           <label>邮件主题</label>
-          <input id="tplSubject" placeholder="例如：应聘【{岗位}】- {姓名}（{学校}）">
+          <input id="tplSubject" oninput="renderPreview()" placeholder="例如：应聘【{岗位}】- {姓名}（{学校}）">
         </div>
         <div class="field">
           <label>邮件正文</label>
-          <textarea id="tplBody" placeholder="尊敬的HR：&#10;&#10;您好！我是{学校}{姓名}，…"></textarea>
+          <textarea id="tplBody" oninput="renderPreview()" placeholder="尊敬的HR：&#10;&#10;您好！我是{学校}{姓名}，…"></textarea>
         </div>
         <div class="hint" style="margin:-4px 0 10px;">💡 框的右下角有两条小斜杠，按住它往下拖，框就变高（写长正文更舒服）；往上拖能缩回去。</div>
         <div class="hint">可用的变量（点一下插入到光标处，发送时自动替换为每家公司的真实内容）：</div>
@@ -380,11 +400,13 @@
           <span class="chip" onclick="insertVar('{专业}')">{专业}</span>
           <span class="chip" onclick="insertVar('{备注}')">{备注}</span>
         </div>
-        <div class="hint">个别公司要求不一样？不用改这里——在「投递清单」里点那家公司的「编辑」，可单独定制它的主题、正文和附件。</div>
-        <div style="display:flex; gap:10px; margin-top:12px;">
-          <button class="btn primary" onclick="saveTemplate()">保存模板</button>
-          <span class="hint" style="align-self:center;">每封邮件都会自动挂上「发送设置」里上传的简历附件</span>
+        <div class="hint">上面下拉里选哪套，就在编辑哪套。<b>新建</b>一套写别的话术（比如专投 AI 岗的），写完在「投递清单」的<b>投递定位</b>那一列挑给它。<br>
+          个别公司要求不一样？不用改这里——在「投递清单」里点那家公司的「编辑」，可单独定制它的主题、正文和附件。</div>
+        <div style="display:flex; gap:10px; margin-top:12px; align-items:center; flex-wrap:wrap;">
+          <button class="btn primary" onclick="saveTemplate()">保存这套</button>
+          <span class="hint">切到别的模板时会自动把改动存一下，不会丢。</span>
         </div>
+        <div class="hint" style="margin-top:8px;">每封邮件都会自动挂上「发送设置」里上传的简历附件。</div>
       </div>
       <div class="card">
         <h2>整封邮件预览 <span class="hint" style="font-weight:400;">（HR 收到的就是这个样子，选一条清单数据模拟）</span></h2>
@@ -392,7 +414,7 @@
           <select id="previewJob" onchange="renderPreview()"></select>
         </div>
         <div class="mail" id="previewBox"></div>
-        <div class="hint" style="margin-top:8px;">带 ⚡ 表示这条清单使用单独定制的主题/正文/附件；未定制的部分用全局模板。</div>
+        <div class="hint" style="margin-top:8px;" id="previewNote"></div>
       </div>
     </div>
   </section>
@@ -512,7 +534,7 @@
           ⑤ 页面会出现一个 <b>16 位字母</b>，比如 abcdwxyzabcdwxyz —— <b>立刻复制，存到手机备忘录！它只显示这一次</b>，关掉就再也看不到了（真忘了也没事：把开关关掉重新开一次，会生成新的）</p></div>
         <div class="step"><div class="num">3</div><p><b>填进软件（2 分钟）</b><br>点软件顶部的「发送设置」：<br>· <b>QQ 邮箱地址</b>：填你的邮箱，如 123456789@qq.com<br>· <b>授权码</b>：粘贴刚才那 16 位字母（<b>不是 QQ 密码！</b>）<br>· <b>姓名 / 学校 / 专业</b>：填自己的，邮件里的 {姓名}{学校}{专业} 会自动替换成这些<br>· 点「保存设置」</p></div>
         <div class="step"><div class="num">4</div><p><b>上传简历（1 分钟）</b><br>还在「发送设置」页面，往下看「简历附件」区：点「选择文件」→ 选中你的简历 PDF → 点「上传附件」。下面出现文件名就是成功了。</p></div>
-        <div class="step"><div class="num">5</div><p><b>写一封通用邮件（3 分钟）</b><br>点「邮件模板」标签页：主题和正文里可以放 {岗位}、{姓名} 这样的"占位词"，软件发信时自动换成真实内容——投字节跳动时 {公司} 自动变成"字节跳动"。右侧「整封邮件预览」能直接看到 HR 收到的效果。改完点「保存模板」。</p></div>
+        <div class="step"><div class="num">5</div><p><b>写一封通用邮件（3 分钟）</b><br>点「邮件模板」标签页：主题和正文里可以放 {岗位}、{姓名} 这样的"占位词"，软件发信时自动换成真实内容——投字节跳动时 {公司} 自动变成"字节跳动"。右侧「整封邮件预览」能直接看到 HR 收到的效果。改完点「保存这套」。<br><span class="hint">想投两类岗位、各用一套说法？这个页面可以存好几套话术，见下面「投递定位」那块。</span></p></div>
       </div>
       <div class="warnbox">
         ⚠️ <b>三个重要提醒</b><br>
@@ -537,6 +559,15 @@
         <b>③ 导：</b>点「✅ 导入选中区域」→ 弹出的确认框会把<b>列的对应关系</b>（第1列=公司…）和<b>前几行长什么样</b>列给你看 → 你点头才真正写进清单。
         <b>不是自动导入。</b><br>
         <span class="hint">列的顺序固定：第1列公司、第2列岗位、第3列收件邮箱、第4列备注。<b>框几列就认几列</b>，备注可以空着；框进来的表头行会自动跳过；重复的（公司+岗位+邮箱都一样）会自动跳过。表格内容会自动存在本机，关掉软件再打开还在 —— 导完记得点「清空表格」。</span>
+      </div>
+      <div class="okbox" style="background:#f4f8fd; border-color:#cfe3f7;">
+        🎯 <b>投递定位：一个人备两套话术，投两类岗位</b><br>
+        想投 AI / 技术岗一套说法，投专业对口岗位又是另一套说法 —— 「邮件模板」页可以存好几套，每套有自己的名字、主题和正文。<br>
+        <b>怎么建：</b>点「＋ 新建一套」→ 起个名字（比如 <b>AI岗</b>）→ 把正文写进去 → 点「保存这套」。<br>
+        <b>怎么用：</b>「投递清单」里有一列叫「<b>投递定位</b>」，每条挑一套；不挑的就跟随标着 ★ 的那套默认。<br>
+        <b>改默认：</b>在「邮件模板」页选中某套，点「★ 设为默认」，以后新导入的清单就默认用它。<br>
+        <span class="hint">某家公司还要更特殊？点它的「编辑」，在「这封邮件单独定制」里单独写——那里优先级最高。<br>
+        发送时会按每条自己的投递定位取话术，日志里也会写清楚这封用的是哪套，方便回头查。</span>
       </div>
       <div class="okbox" style="background:#f7f5fd; border-color:#ddd6f5;">
         🏷 <b>标签：公司一多，靠它分组</b><br>
@@ -616,8 +647,15 @@
       </div>
     </div>
     <div style="border-top:1px dashed #e5e7eb; margin:14px 0 10px; padding-top:12px;">
+      <b style="font-size:13px; color:#0c447c;">投递定位（这家用哪套话术）</b>
+      <div class="field" style="margin-top:8px;">
+        <select id="fTemplateSel"></select>
+        <div class="hint" style="margin-top:4px;">选「默认」就跟随「邮件模板」页里标着 ★ 的那套；想给这家单独用别的，在这儿挑。</div>
+      </div>
+    </div>
+    <div style="border-top:1px dashed #e5e7eb; margin:14px 0 10px; padding-top:12px;">
       <b style="font-size:13px; color:#0c447c;">这封邮件单独定制（可选）</b>
-      <div class="hint" style="margin:4px 0 10px;">有的公司要求不一样：留空就沿用「邮件模板」的全局内容；填了就以这里为准。</div>
+      <div class="hint" style="margin:4px 0 10px;">有的公司要求不一样：留空就沿用上面那套话术；填了就以这里为准。</div>
       <div class="field"><label>该公司的邮件主题（留空用全局）</label><input id="fSubject" placeholder="例如：应聘-{姓名}-毕业学校-专业"></div>
       <div class="field"><label>该公司的邮件正文（留空用全局）</label><textarea id="fBody" style="height:110px;" placeholder="例如：尊敬的老师：您好！我是{学校}{专业}{姓名}…"></textarea></div>
       <div class="field">
@@ -707,7 +745,9 @@
 <div id="toast"></div>
 
 <script>
-let JOBS = [], CONFIG = {}, TEMPLATE = {}, ATTS = [], MERGE_FILES = [], EDIT_ID = null, pollTimer = null;
+let JOBS = [], CONFIG = {}, ATTS = [], MERGE_FILES = [], EDIT_ID = null, pollTimer = null;
+// 模板库：list 里存好几套话术，default_id 标着哪套是「默认」
+let TPLS = { list: [], default_id: "" }, TPL_CUR = "";
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -923,9 +963,10 @@ function renderJobs() {
       ${editCell(j, "note", "wrap")}
       <td class="tagbox">${tagCell(j)}</td>
       <td>${pgSel}</td>
+      <td>${tplCell(j)}</td>
       <td>${tags.length
         ? `<span class="custom-tag" style="cursor:pointer;" onclick="openAttList('${j.id}')" title="点一下看这家要发的附件">⚡ ${tags.join("·")}</span>`
-        : `<span style="color:#c0c4cc;cursor:pointer;" onclick="openAttList('${j.id}')" title="这条用全局模板 + 附件库里的全部附件，点一下看看是哪几个">全局</span>`}</td>
+        : `<span style="color:#c0c4cc;cursor:pointer;" onclick="openAttList('${j.id}')" title="这条用上面那套话术 + 附件库里的全部附件，点一下看看是哪几个">全局</span>`}</td>
       <td><span class="badge st-${j.status}">${j.status}</span>${j.error ? `<div class="err-text">${esc(j.error)}</div>` : ""}</td>
       <td style="font-size:12px;color:#6b7280;">${j.sent_at
         ? `<span class="lnk" style="font-size:12px;" onclick="openHist('${j.id}')" title="点一下看这家的投递记录">${esc(j.sent_at)}</span>`
@@ -1022,6 +1063,7 @@ async function openAdd() {
   EDIT_ID = null; $("#editTitle").textContent = "添加投递目标";
   ["fCompany","fPosition","fEmail","fNote","fTags","fSubject","fBody","fEventDate","fMyNote"].forEach(id => $("#"+id).value = "");
   $("#fProgressSel").value = "未回音";
+  renderEditTpl(null);
   renderEditAtts(null);
   $("#editOverlay").classList.add("show");
 }
@@ -1032,6 +1074,7 @@ function openEdit(id) {
   $("#fTags").value = (j.tags || []).join("，");
   $("#fSubject").value = j.subject_override || ""; $("#fBody").value = j.body_override || "";
   $("#fProgressSel").value = j.progress || "未回音"; $("#fEventDate").value = j.event_date || ""; $("#fMyNote").value = j.mynote || "";
+  renderEditTpl(j);
   renderEditAtts(j);
   $("#editOverlay").classList.add("show");
 }
@@ -1061,6 +1104,7 @@ async function saveEdit() {
   const data = {
     company: $("#fCompany").value, position: $("#fPosition").value, email: $("#fEmail").value, note: $("#fNote").value,
     tags: $("#fTags").value,
+    template_id: $("#fTemplateSel").value,
     subject_override: $("#fSubject").value, body_override: $("#fBody").value,
     progress: $("#fProgressSel").value, event_date: $("#fEventDate").value, mynote: $("#fMyNote").value,
     atts: [...document.querySelectorAll(".fatt:checked")].map(c => c.value),
@@ -1090,20 +1134,149 @@ $("#importInput").onchange = async e => {
   const r = await api("/api/jobs/import", { data: b64 });
   e.target.value = "";
   if (!r.ok) return toast(r.error, false);
-  toast(`导入完成：新增 ${r.added} 条${r.skipped ? `，跳过重复 ${r.skipped} 条` : ""}${r.invalid ? `，无效邮箱 ${r.invalid} 条` : ""}`);
+  toast(`导入完成：新增 ${r.added} 条${r.skipped ? `，跳过重复 ${r.skipped} 条` : ""}${r.invalid ? `，无效邮箱 ${r.invalid} 条` : ""}${r.tpl_miss ? `；有 ${r.tpl_miss} 条写的投递定位对不上模板名，已按默认处理` : ""}`);
   loadJobs();
 };
 
-/* ---------- template ---------- */
+/* ---------- 模板库：可以存好几套话术 ---------- */
+function tplById(id) { return (TPLS.list || []).find(t => t.id === id) || null; }
+function defaultTpl() { return tplById(TPLS.default_id) || (TPLS.list || [])[0] || null; }
+function curTpl() { return tplById(TPL_CUR) || defaultTpl(); }
+function tplName(id) { const t = tplById(id); return t ? t.name : ""; }
+// 清单那一列里「默认」怎么显示：默认那套就叫「默认」就显示俩字，否则把名字带上
+function dftLabel() {
+  const d = defaultTpl();
+  if (!d) return "默认";
+  return d.name === "默认" ? "默认" : "默认·" + d.name;
+}
+function renderTplPick() {
+  const sel = $("#tplPick");
+  sel.innerHTML = (TPLS.list || []).map(t => {
+    // 名字本身就叫「默认」，后面再加个（默认）就成「默认（默认）」了，难看
+    const mark = (t.id === TPLS.default_id && t.name !== "默认") ? "（默认）" : "";
+    return `<option value="${t.id}">${esc(t.name)}${mark}</option>`;
+  }).join("") || `<option value="">（还没有模板）</option>`;
+  if (!tplById(TPL_CUR)) TPL_CUR = (defaultTpl() || {}).id || "";
+  sel.value = TPL_CUR;
+  const t = curTpl();
+  $("#tplDftTag").style.display = (t && t.id === TPLS.default_id) ? "" : "none";
+}
+function fillTplEditor() {
+  const t = curTpl();
+  $("#tplSubject").value = t ? (t.subject || "") : "";
+  $("#tplBody").value = t ? (t.body || "") : "";
+}
+/* 切换/新建前先把编辑框里的改动静默存掉，免得一换就丢 */
+async function flushTpl(silent) {
+  const t = curTpl();
+  if (!t) return true;
+  const subject = $("#tplSubject").value, body = $("#tplBody").value;
+  if ((t.subject || "") === subject && (t.body || "") === body) return true;
+  const r = await api("/api/template", { id: t.id, subject, body });
+  if (!r.ok) { if (!silent) toast(r.error, false); return false; }
+  TPLS = r.templates || TPLS;
+  return true;
+}
+async function switchTemplate(id) {
+  if (id === TPL_CUR) return;
+  await flushTpl(true);
+  TPL_CUR = id;
+  renderTplPick();
+  fillTplEditor();
+  renderJobs();
+  renderPreview();
+}
+async function saveTemplate() {
+  const t = curTpl(); if (!t) return;
+  const changed = (t.subject || "") !== $("#tplSubject").value || (t.body || "") !== $("#tplBody").value;
+  if (!(await flushTpl(true))) return;
+  renderTplPick();
+  toast(changed ? `「${t.name}」已保存` : `「${t.name}」没有改动`);
+}
+async function addTemplate() {
+  await flushTpl(true);
+  const name = prompt("给这套新话术起个名字（「投递清单」的投递定位那一列，显示的就是这个名字）\n例如：AI岗、专业对口、国企", "");
+  if (name === null) return;
+  const nm = name.trim();
+  if (!nm) return toast("得起个名字，不然清单里分不清哪套是哪套", false);
+  const r = await api("/api/templates/add", { name: nm, subject: $("#tplSubject").value });
+  if (!r.ok) return toast(r.error, false);
+  TPLS = r.templates; TPL_CUR = r.id;
+  renderTplPick(); fillTplEditor();
+  renderJobs(); renderPreview();
+  $("#tplBody").focus();
+  toast(`「${nm}」建好了：把正文写进去，写完点「保存这套」`);
+}
+async function renameTemplate() {
+  const t = curTpl(); if (!t) return;
+  const v = prompt("改个名字（「投递清单」的投递定位那一列，显示的就是这个名字）：", t.name);
+  if (v === null) return;
+  const nm = v.trim();
+  if (!nm || nm === t.name) return;
+  const r = await api("/api/templates/rename", { id: t.id, name: nm });
+  if (!r.ok) return toast(r.error, false);
+  TPLS = r.templates;
+  renderTplPick(); renderJobs(); renderPreview();
+  toast("名字改好了");
+}
+async function setDefaultTemplate() {
+  const t = curTpl(); if (!t) return;
+  if (t.id === TPLS.default_id) return toast("这套已经是默认了", false);
+  const r = await api("/api/templates/default", { id: t.id });
+  if (!r.ok) return toast(r.error, false);
+  TPLS = r.templates;
+  renderTplPick(); renderJobs(); renderPreview();
+  toast(`以后新导入的清单，默认用「${t.name}」`);
+}
+async function delTemplate() {
+  const t = curTpl(); if (!t) return;
+  if ((TPLS.list || []).length <= 1) return toast("至少得留一套话术，不然邮件没内容可发", false);
+  const used = JOBS.filter(j => j.template_id === t.id).length;
+  if (!confirm(`删掉「${t.name}」这套话术？\n\n` +
+      (used ? `有 ${used} 条清单指着它，删掉后这 ${used} 条会回到「默认」，可以再手动改。\n\n` : "") +
+      `话术内容删了就找不回来了。`)) return;
+  const r = await api("/api/templates/delete", { id: t.id });
+  if (!r.ok) return toast(r.error, false);
+  TPLS = r.templates; TPL_CUR = TPLS.default_id;
+  renderTplPick(); fillTplEditor();
+  await loadJobs();
+  renderPreview();
+  toast("已删除" + (r.reset ? `，${r.reset} 条清单回到默认` : ""));
+}
+/* 清单里那条「投递定位」下拉 */
+function tplCell(j) {
+  const cur = j.template_id || "";
+  const tip = cur ? `发送时用「${tplName(cur)}」这套话术`
+                  : `跟随默认：发送时用「${(defaultTpl() || {}).name || ""}」`;
+  let html = `<select class="tpl-select" title="${esc(tip)}" onchange="setTpl('${j.id}', this.value)">`;
+  html += `<option value=""${cur ? "" : " selected"}>${esc(dftLabel())}</option>`;
+  (TPLS.list || []).forEach(t => {
+    html += `<option value="${t.id}"${cur === t.id ? " selected" : ""}>${esc(t.name)}</option>`;
+  });
+  return html + `</select>`;
+}
+async function setTpl(id, val) {
+  const j = JOBS.find(x => x.id === id);
+  if (j) j.template_id = val;
+  const r = await api("/api/jobs/update", { id, template_id: val });
+  if (!r.ok) return toast(r.error, false);
+  renderJobs();
+  renderPreview();
+  toast(`投递定位改成：${val ? tplName(val) : "默认"}`);
+}
+function renderEditTpl(job) {
+  const cur = (job && job.template_id) || "";
+  $("#fTemplateSel").innerHTML =
+    `<option value=""${cur ? "" : " selected"}>默认（${esc((defaultTpl() || {}).name || "")}）</option>` +
+    (TPLS.list || []).map(t =>
+      `<option value="${t.id}"${cur === t.id ? " selected" : ""}>${esc(t.name)}</option>`).join("");
+}
 function insertVar(v) {
   const el = document.activeElement === $("#tplBody") ? $("#tplBody") : $("#tplSubject");
   const pos = el.selectionStart || el.value.length;
   el.value = el.value.slice(0, pos) + v + el.value.slice(pos);
   el.focus(); el.selectionStart = el.selectionEnd = pos + v.length;
-}
-async function saveTemplate() {
-  const r = await api("/api/template", { subject: $("#tplSubject").value, body: $("#tplBody").value });
-  if (r.ok) { toast("模板已保存"); TEMPLATE.subject = $("#tplSubject").value; TEMPLATE.body = $("#tplBody").value; renderPreview(); }
+  renderPreview();
 }
 function refreshPreviewSelect() {
   const sel = $("#previewJob");
@@ -1122,8 +1295,9 @@ function renderPreview() {
   const rep = t => (t || "").replaceAll("{公司}", job.company || "").replaceAll("{岗位}", job.position || "")
     .replaceAll("{备注}", job.note || "").replaceAll("{姓名}", cfg.name || "")
     .replaceAll("{学校}", cfg.school || "").replaceAll("{专业}", cfg.major || "");
-  const subject = rep(job.subject_override || TEMPLATE.subject || "");
-  const body = rep(job.body_override || TEMPLATE.body || "");
+  // 内容来源：这条单独定制过就显示定制的；否则跟着左边正在编辑的那套话术实时变
+  const subject = rep(job.subject_override || $("#tplSubject").value || "");
+  const body = rep(job.body_override || $("#tplBody").value || "");
   const chosen = (job.atts && job.atts.length) ? job.atts : (ATTS || []).map(a => a.name);
   const attHtml = (ATTS || []).filter(a => chosen.includes(a.name))
     .map(a => `<div style="display:flex;align-items:center;gap:6px;padding:2px 0;">📄 ${esc(a.name)} ` +
@@ -1139,12 +1313,25 @@ function renderPreview() {
     </div>
     <div class="mb">${esc(body)}</div>
     <div class="matts"><b style="font-weight:500;">附件：</b><br>${attHtml}</div>`;
+
+  const t = curTpl();
+  const jt = job.template_id ? tplName(job.template_id) : "";
+  const parts = [];
+  parts.push(`上面预览的内容，来自左边正在编辑的「<b>${esc(t ? t.name : "（还没有模板）")}</b>」这套话术。`);
+  parts.push(jt
+    ? `清单里这条的「投递定位」选了「<b>${esc(jt)}</b>」，实际发出去用那套。`
+    : `清单里这条的「投递定位」是「默认」，实际发出去用「<b>${esc((defaultTpl() || {}).name || "")}</b>」那套。`);
+  if (isCustom(job)) parts.push(`这条还做过 ⚡ 单独定制，以定制内容为准。`);
+  $("#previewNote").innerHTML = parts.join("<br>");
 }
 
 /* ---------- config & attachments ---------- */
 async function loadState() {
   const r = await api("/api/state");
-  CONFIG = r.config || {}; TEMPLATE = r.template || {}; ATTS = r.attachments || [];
+  CONFIG = r.config || {};
+  TPLS = r.templates || { list: [], default_id: "" };
+  if (!tplById(TPL_CUR)) TPL_CUR = TPLS.default_id || ((TPLS.list || [])[0] || {}).id || "";
+  ATTS = r.attachments || [];
   $("#cfgEmail").value = CONFIG.email || "";
   $("#cfgAuth").value = CONFIG.auth_code || "";
   $("#cfgDisplay").value = CONFIG.display_name || "";
@@ -1153,8 +1340,8 @@ async function loadState() {
   $("#cfgMajor").value = CONFIG.major || "";
   $("#cfgInterval").value = CONFIG.interval || 40;
   $("#cfgLimit").value = CONFIG.daily_limit || 50;
-  $("#tplSubject").value = TEMPLATE.subject || "";
-  $("#tplBody").value = TEMPLATE.body || "";
+  renderTplPick();
+  fillTplEditor();
   $("#qToday").textContent = r.today_sent; $("#qLimit").textContent = r.daily_limit;
   renderAtt(r.attachments || []);
   MERGE_FILES = r.merge_files || [];

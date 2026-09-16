@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 简历批量投递助手 - 本地服务
-功能：投递清单管理（增删改查 / Excel 导入导出）、邮件模板（变量替换）、
+功能：投递清单管理（增删改查 / Excel 导入导出）、邮件话术（可存好几套，按「投递定位」取用）、
      证明材料合并成一个 PDF（PDF + 图片混拼，图片自动摆正 / 压到 A4）、
      QQ 邮箱 SMTP 批量发送（间隔控制 / 每日上限 / 失败记录 / 中途停止）
 说明：所有数据只保存在本机 data/ 与 attachments/ 目录中，不经过任何第三方服务器。
@@ -36,6 +36,11 @@ INDEX_HTML = os.path.join(BASE, "index.html")
 
 ATT_NOTE_FILE = "attachment_notes.json"   # {文件名: 备注文字}，备注只存在本机，不会随邮件发出
 SHEET_FILE = "sheet_draft.json"           # 在线填表的草稿，关掉软件再打开还在
+
+# 模板库：可以同时存好几套话术（一套投 AI 岗、一套投专业对口岗…）。
+# 每条投递目标在「投递定位」那一列挑一套；不挑就跟随这里标记为默认的那套。
+TPL_FILE = "templates.json"
+DEFAULT_TPL_NAME = "默认"
 
 # 在线填表 / 按列导入 的列顺序：第1列公司、第2列岗位、第3列收件邮箱、第4列备注
 SHEET_COLS = ["company", "position", "email", "note"]
@@ -122,8 +127,8 @@ def init_dirs():
         save_json("config.json", DEFAULT_CONFIG)
     if not os.path.exists(_path("jobs.json")):
         save_json("jobs.json", [])
-    if not os.path.exists(_path("template.json")):
-        save_json("template.json", DEFAULT_TEMPLATE)
+    if not os.path.exists(_path(TPL_FILE)):
+        get_templates()      # 第一次运行自动建一套「默认」；老版本升上来的会把 template.json 的内容搬进去
     if not os.path.exists(_path("sent_log.json")):
         save_json("sent_log.json", [])
     if not os.path.exists(_path(ATT_NOTE_FILE)):
@@ -138,10 +143,81 @@ def get_config():
     return cfg
 
 
-def get_template():
-    tpl = dict(DEFAULT_TEMPLATE)
-    tpl.update(load_json("template.json", {}))
-    return tpl
+# ---------------------------------------------------------------- 模板库
+def _new_tpl_id():
+    return "t%d" % int(time.time() * 1000)
+
+
+def _clean_tpl(t):
+    """把一套模板收拾成固定格式，坏数据一律换成安全值。"""
+    return {
+        "id": str(t.get("id") or _new_tpl_id()),
+        "name": (str(t.get("name") or "").strip() or DEFAULT_TPL_NAME)[:30],
+        "subject": str(t.get("subject") or ""),
+        "body": str(t.get("body") or ""),
+    }
+
+
+def get_templates():
+    """读模板库。
+
+    老版本只有一套（data/template.json），第一次读不到 templates.json 就自动搬过来，
+    所以用户升级后不用重新写话术。
+    """
+    d = load_json(TPL_FILE, None)
+    items = d.get("list") if isinstance(d, dict) else None
+    if not isinstance(items, list) or not items:
+        old = load_json("template.json", {})
+        old = old if isinstance(old, dict) else {}
+        base = dict(DEFAULT_TEMPLATE)
+        base.update(old)
+        d = {"list": [{"id": "t1", "name": DEFAULT_TPL_NAME,
+                       "subject": base.get("subject", ""), "body": base.get("body", "")}],
+             "default_id": "t1"}
+        save_json(TPL_FILE, d)
+
+    clean = [_clean_tpl(t) for t in d.get("list", []) if isinstance(t, dict)]
+    if not clean:
+        clean = [{"id": "t1", "name": DEFAULT_TPL_NAME,
+                  "subject": DEFAULT_TEMPLATE["subject"], "body": DEFAULT_TEMPLATE["body"]}]
+    default_id = str(d.get("default_id") or "")
+    if default_id not in [t["id"] for t in clean]:
+        default_id = clean[0]["id"]
+    return {"list": clean, "default_id": default_id}
+
+
+def find_template(tpls, tid):
+    """按 id 找一套；找不到（比如那条清单指定的模板被删了）就回落到默认那套。"""
+    for t in tpls["list"]:
+        if t["id"] == tid:
+            return t
+    for t in tpls["list"]:
+        if t["id"] == tpls["default_id"]:
+            return t
+    return tpls["list"][0]
+
+
+def template_for_job(job, tpls):
+    """这条投递目标该用哪套话术：它自己指定的 > 默认那套。"""
+    return find_template(tpls, str((job or {}).get("template_id") or ""))
+
+
+def tpl_display_name(job, tpls):
+    """这条清单的「投递定位」显示成什么：没指定就写「默认」，指定了写那套的名字。
+
+    导出 Excel、网页上都要用同一个写法，免得两边对不上。
+    """
+    tid = str((job or {}).get("template_id") or "")
+    if tid:
+        for t in tpls["list"]:
+            if t["id"] == tid:
+                return t["name"]
+    return DEFAULT_TPL_NAME
+
+
+def save_templates(tpls):
+    save_json(TPL_FILE, tpls)
+    return tpls
 
 
 def get_jobs():
@@ -572,9 +648,15 @@ def resolve_attachments(job):
     return picked
 
 
-def build_message(job, cfg, tpl):
-    """构建邮件。优先使用该投递目标的单独定制（subject_override / body_override / atts），
-    未定制的部分回落到全局模板。"""
+def build_message(job, cfg, tpls):
+    """构建邮件。
+
+    主题和正文从哪来（优先级从高到低）：
+      1. 这条投递目标单独定制的（subject_override / body_override）
+      2. 这条「投递定位」指定用哪套话术
+      3. 模板库里的默认那套
+    """
+    tpl = template_for_job(job, tpls)
     subject = render(job.get("subject_override") or tpl.get("subject", ""), job, cfg)
     body = render(job.get("body_override") or tpl.get("body", ""), job, cfg)
     display = cfg.get("display_name") or cfg.get("name") or "求职者"
@@ -592,20 +674,20 @@ def build_message(job, cfg, tpl):
         part.add_header("Content-Disposition", "attachment",
                         filename=("utf-8", "", att["name"]))
         msg.attach(part)
-    return msg, subject
+    return msg, subject, tpl.get("name", "")
 
 
-def send_one(job, cfg, tpl):
+def send_one(job, cfg, tpls):
     try:
-        msg, subject = build_message(job, cfg, tpl)
+        msg, subject, tpl_name = build_message(job, cfg, tpls)
         with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=30) as s:
             s.login(cfg["email"], cfg["auth_code"])
             s.send_message(msg)
-        return True, "", subject
+        return True, "", subject, tpl_name
     except smtplib.SMTPAuthenticationError:
-        return False, "登录失败：邮箱地址或授权码不正确（授权码不是QQ密码，需在QQ邮箱设置里生成）", ""
+        return False, "登录失败：邮箱地址或授权码不正确（授权码不是QQ密码，需在QQ邮箱设置里生成）", "", ""
     except (smtplib.SMTPException, socket.timeout, OSError) as e:
-        return False, "发送失败：%s" % e, ""
+        return False, "发送失败：%s" % e, "", ""
 
 
 # ---------------------------------------------------------------- 发送线程
@@ -638,7 +720,7 @@ def _interruptible_sleep(seconds):
 
 def sender_worker(job_ids):
     cfg = get_config()
-    tpl = get_template()
+    tpls = get_templates()
     interval = max(5, int(cfg.get("interval", 40)))
     daily_limit = int(cfg.get("daily_limit", 50))
     jobs = get_jobs()
@@ -668,13 +750,14 @@ def sender_worker(job_ids):
             SEND_STATE["current"] = "%s · %s" % (job.get("company", ""), job.get("position", ""))
             save_jobs(jobs)
 
-            ok, err, subject = send_one(job, cfg, tpl)
+            ok, err, subject, tpl_name = send_one(job, cfg, tpls)
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             if ok:
                 job["status"] = "已发送"
                 job["sent_at"] = now
                 job["error"] = ""
-                log_add("已发送：%s → %s（%s）" % (job.get("company"), job["email"], subject), "ok")
+                log_add("已发送：%s → %s（用「%s」｜主题：%s）"
+                        % (job.get("company"), job["email"], tpl_name, subject), "ok")
             else:
                 job["status"] = "失败"
                 job["error"] = err
@@ -733,21 +816,23 @@ def excel_export_bytes():
     wb = Workbook()
     ws = wb.active
     ws.title = "投递记录"
-    headers = ["公司", "岗位", "收件邮箱", "备注", "标签", "状态", "发送时间", "失败原因",
-               "我的进展", "重要日期", "我的笔记"]
+    headers = ["公司", "岗位", "收件邮箱", "备注", "投递定位", "标签", "状态", "发送时间",
+               "失败原因", "我的进展", "重要日期", "我的笔记"]
     fills = PatternFill("solid", fgColor="185FA5")
     for c, h in enumerate(headers, 1):
         cell = ws.cell(row=1, column=c, value=h)
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = fills
+    tpls = get_templates()
     for r, j in enumerate(get_jobs(), 2):
         row = [j.get("company"), j.get("position"), j.get("email"), j.get("note"),
+               tpl_display_name(j, tpls),
                "，".join(j.get("tags") or []),
                j.get("status"), j.get("sent_at", ""), j.get("error", ""),
                j.get("progress", "未回音"), j.get("event_date", ""), j.get("mynote", "")]
         for c, v in enumerate(row, 1):
             ws.cell(row=r, column=c, value=v)
-    widths = [24, 20, 34, 28, 18, 10, 20, 36, 12, 14, 40]
+    widths = [24, 20, 34, 28, 14, 18, 10, 20, 36, 12, 14, 40]
     for i, w in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
     buf = io.BytesIO()
@@ -786,7 +871,7 @@ def _looks_like_header(vals):
 
 
 def _append_job(jobs, existing, company, position, email, note, tags,
-                progress="", event_date="", mynote=""):
+                progress="", event_date="", mynote="", template_id=""):
     """把一行数据变成清单条目。返回 "added"（新增）或 "dup"（重复，跳过）。"""
     key = (email, position, company)
     if key in existing:
@@ -796,6 +881,7 @@ def _append_job(jobs, existing, company, position, email, note, tags,
         "id": "j%d%03d" % (int(time.time() * 1000), len(jobs) % 1000),
         "company": company, "position": position, "email": email, "note": note,
         "tags": list(tags or []),
+        "template_id": str(template_id or ""),
         "subject_override": "", "body_override": "", "atts": [],
         "progress": progress if progress in ("未回音", "笔试", "面试", "Offer", "挂了", "我放弃") else "未回音",
         "event_date": event_date,
@@ -838,6 +924,8 @@ def excel_import(b64_data, tags=None):
             header_map["event_date"] = cell.column
         elif "笔记" in v:
             header_map["mynote"] = cell.column
+        elif "定位" in v or "话术" in v or "模板" in v:
+            header_map["template"] = cell.column
 
     if "email" in header_map and ("company" in header_map or "position" in header_map):
         start_row = 2                                  # 表头认出来了，数据从第 2 行开始
@@ -848,7 +936,9 @@ def excel_import(b64_data, tags=None):
     tags = norm_tags(tags)
     jobs = get_jobs()
     existing = {(j.get("email"), j.get("position"), j.get("company")) for j in jobs}
-    added, skipped, bad = 0, 0, 0
+    tpls = get_templates()
+    tpl_by_name = {t["name"]: t["id"] for t in tpls["list"]}
+    added, skipped, bad, tpl_miss = 0, 0, 0, 0
     for row in ws.iter_rows(min_row=start_row):
         vals = {k: (_cell_text(row[c - 1].value) if 1 <= c <= len(row) else "")
                 for k, c in header_map.items()}
@@ -861,14 +951,22 @@ def excel_import(b64_data, tags=None):
         if "@" not in email:
             bad += 1                                   # 没有邮箱，发不了，算无效
             continue
+        # 「投递定位」那一列：写模板名字；写「默认」或留空就跟随默认那套
+        tname = (vals.get("template") or "").strip()
+        tpl_id = ""
+        if tname and tname != DEFAULT_TPL_NAME:
+            tpl_id = tpl_by_name.get(tname, "")
+            if not tpl_id:
+                tpl_miss += 1                          # 名字对不上，就当默认处理，不挡导入
         r = _append_job(jobs, existing, company, position, email, note, tags,
-                        vals.get("progress", ""), vals.get("event_date", ""), vals.get("mynote", ""))
+                        vals.get("progress", ""), vals.get("event_date", ""),
+                        vals.get("mynote", ""), tpl_id)
         if r == "dup":
             skipped += 1
         else:
             added += 1
     save_jobs(jobs)
-    return {"added": added, "skipped": skipped, "invalid": bad}
+    return {"added": added, "skipped": skipped, "invalid": bad, "tpl_miss": tpl_miss}
 
 
 def import_rows(rows, tags=None):
@@ -1056,7 +1154,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({
                     "ok": True,
                     "config": masked,
-                    "template": get_template(),
+                    "templates": get_templates(),
                     "send": {k: SEND_STATE[k] for k in ("running", "stop", "current", "done", "total")},
                     "today_sent": today_sent_count(),
                     "daily_limit": cfg.get("daily_limit", 50),
@@ -1116,13 +1214,88 @@ class Handler(BaseHTTPRequestHandler):
                 save_json("config.json", cfg)
                 self._json({"ok": True})
             elif path == "/api/template":
-                tpl = get_template()
+                # 保存某一套话术的内容。不带 id 就存默认那套（老前端也能用）
+                tpls = get_templates()
+                tid = str(body.get("id") or "")
+                t = next((x for x in tpls["list"] if x["id"] == tid), None) if tid else None
+                if t is None:
+                    t = find_template(tpls, "")
                 if "subject" in body:
-                    tpl["subject"] = str(body["subject"])
+                    t["subject"] = str(body["subject"])
                 if "body" in body:
-                    tpl["body"] = str(body["body"])
-                save_json("template.json", tpl)
-                self._json({"ok": True})
+                    t["body"] = str(body["body"])
+                if "name" in body:
+                    t["name"] = (str(body["name"]).strip() or t["name"])[:30]
+                save_templates(tpls)
+                self._json({"ok": True, "templates": tpls})
+            elif path == "/api/templates/add":
+                # 新建一套话术：主题沿用当前这套的格式（格式一般不变），正文留空等你写
+                tpls = get_templates()
+                name = (str(body.get("name") or "").strip() or "新话术")[:30]
+                taken = {x["name"] for x in tpls["list"]}
+                if name in taken:
+                    i = 2
+                    while ("%s%d" % (name, i)) in taken:
+                        i += 1
+                    name = "%s%d" % (name, i)
+                new = {
+                    "id": _new_tpl_id(),
+                    "name": name,
+                    "subject": str(body.get("subject") or DEFAULT_TEMPLATE["subject"]),
+                    "body": "",
+                }
+                tpls["list"].append(new)
+                save_templates(tpls)
+                self._json({"ok": True, "templates": tpls, "id": new["id"]})
+            elif path == "/api/templates/rename":
+                tpls = get_templates()
+                tid = str(body.get("id") or "")
+                want = str(body.get("name") or "").strip()[:30]
+                if not want:
+                    self._json({"ok": False, "error": "名字不能空着"})
+                    return
+                t = next((x for x in tpls["list"] if x["id"] == tid), None)
+                if not t:
+                    self._json({"ok": False, "error": "没找到这套话术"})
+                    return
+                if any(x["id"] != tid and x["name"] == want for x in tpls["list"]):
+                    self._json({"ok": False, "error": "已经有同名的话术了，换个名字"})
+                    return
+                t["name"] = want
+                save_templates(tpls)
+                self._json({"ok": True, "templates": tpls})
+            elif path == "/api/templates/default":
+                tpls = get_templates()
+                tid = str(body.get("id") or "")
+                if not any(x["id"] == tid for x in tpls["list"]):
+                    self._json({"ok": False, "error": "没找到这套话术"})
+                    return
+                tpls["default_id"] = tid
+                save_templates(tpls)
+                self._json({"ok": True, "templates": tpls})
+            elif path == "/api/templates/delete":
+                tpls = get_templates()
+                tid = str(body.get("id") or "")
+                if len(tpls["list"]) <= 1:
+                    self._json({"ok": False, "error": "至少得留一套话术，不然邮件没内容可发"})
+                    return
+                if not any(x["id"] == tid for x in tpls["list"]):
+                    self._json({"ok": False, "error": "没找到这套话术"})
+                    return
+                tpls["list"] = [x for x in tpls["list"] if x["id"] != tid]
+                if tpls["default_id"] == tid:
+                    tpls["default_id"] = tpls["list"][0]["id"]
+                save_templates(tpls)
+                # 原来挂在它上面的清单，回到「默认」，用户想改再手动改
+                jobs = get_jobs()
+                n = 0
+                for j in jobs:
+                    if str(j.get("template_id") or "") == tid:
+                        j["template_id"] = ""
+                        n += 1
+                if n:
+                    save_jobs(jobs)
+                self._json({"ok": True, "templates": tpls, "reset": n})
             elif path == "/api/preview":
                 job_id = body.get("job_id", "")
                 jobs = get_jobs()
@@ -1132,7 +1305,8 @@ class Handler(BaseHTTPRequestHandler):
                                                 "email": "hr@example.com", "note": "",
                                                 "subject_override": "", "body_override": "", "atts": []}
                 cfg = get_config()
-                tpl = get_template()
+                tpls = get_templates()
+                tpl = template_for_job(job, tpls)
                 display = cfg.get("display_name") or cfg.get("name") or "求职者"
                 atts = resolve_attachments(job)
                 self._json({
@@ -1141,6 +1315,7 @@ class Handler(BaseHTTPRequestHandler):
                     "to": job.get("email", ""),
                     "subject": render(job.get("subject_override") or tpl.get("subject", ""), job, cfg),
                     "body": render(job.get("body_override") or tpl.get("body", ""), job, cfg),
+                    "template_name": tpl.get("name", ""),
                     "attachments": atts,
                     "custom": bool(job.get("subject_override") or job.get("body_override") or job.get("atts")),
                     "job": job,
@@ -1154,6 +1329,7 @@ class Handler(BaseHTTPRequestHandler):
                     "email": str(body.get("email", "")).strip(),
                     "note": str(body.get("note", "")).strip(),
                     "tags": norm_tags(body.get("tags")),
+                    "template_id": str(body.get("template_id") or "").strip(),
                     "subject_override": str(body.get("subject_override", "")).strip(),
                     "body_override": str(body.get("body_override", "")),
                     "atts": [str(a) for a in (body.get("atts") or [])],
@@ -1174,7 +1350,7 @@ class Handler(BaseHTTPRequestHandler):
                 for j in jobs:
                     if j["id"] == jid:
                         for k in ("company", "position", "email", "note", "subject_override",
-                                  "body_override", "mynote", "event_date"):
+                                  "body_override", "mynote", "event_date", "template_id"):
                             if k in body:
                                 j[k] = str(body[k]).strip()
                         if "progress" in body:
@@ -1313,15 +1489,27 @@ class Handler(BaseHTTPRequestHandler):
                 if not cfg.get("email") or not cfg.get("auth_code"):
                     self._json({"ok": False, "error": "请先在「发送设置」中填写 QQ 邮箱和授权码"})
                     return
-                tpl = get_template()
-                if not tpl.get("subject") or not tpl.get("body"):
-                    self._json({"ok": False, "error": "请先在「邮件模板」中填写主题和正文"})
-                    return
                 ids = body.get("ids", [])
                 jobs = get_jobs()
                 valid = [j["id"] for j in jobs if j["id"] in set(ids) and j["status"] != "已发送"]
                 if not valid:
                     self._json({"ok": False, "error": "没有可投递的目标（已发送的不会重复投递）"})
+                    return
+                # 这一批要用到的每套话术都得填好主题和正文，否则发出去是空白邮件
+                tpls = get_templates()
+                bad_tpl = []
+                for j in jobs:
+                    if j["id"] not in set(valid):
+                        continue
+                    t = template_for_job(j, tpls)
+                    if not str(t.get("subject") or "").strip() or not str(t.get("body") or "").strip():
+                        nm = t.get("name") or "未命名"
+                        if nm not in bad_tpl:
+                            bad_tpl.append(nm)
+                if bad_tpl:
+                    self._json({"ok": False,
+                                "error": "「%s」这套话术的主题或正文还是空的，先去「邮件模板」写完再投"
+                                         % "、".join(bad_tpl)})
                     return
                 for j in jobs:
                     if j["id"] in set(valid) and j["status"] == "失败":

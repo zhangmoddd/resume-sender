@@ -26,7 +26,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formataddr
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import quote, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE, "data")
@@ -45,6 +45,18 @@ MERGE_DPI = 144               # 图片放进 PDF 的分辨率。144 够 HR 看�
 MERGE_MARGIN = 0.04           # 页面四周留 4% 白边，证书照片贴着纸边不好看、打印也容易被切
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif", ".tif", ".tiff"}
+
+# 能在网页里直接打开预览的格式：PDF 用浏览器自带的阅读器（能放大、翻页、搜索），图片直接显示。
+# 其它格式（zip、doc 之类）浏览器打不开，界面里会提示改用下载。
+PREVIEW_TYPES = {
+    ".pdf": "application/pdf",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".bmp": "image/bmp",
+    ".webp": "image/webp",
+}
 
 SMTP_HOST = "smtp.qq.com"
 SMTP_PORT = 465
@@ -184,13 +196,22 @@ def drop_att_note(name):
         save_json(ATT_NOTE_FILE, d)
 
 
+def preview_kind(name):
+    """"pdf" / "image" / "other" —— 决定浏览器里能不能直接打开看。"""
+    ext = os.path.splitext(str(name or ""))[1].lower()
+    if ext not in PREVIEW_TYPES:
+        return "other"
+    return "pdf" if ext == ".pdf" else "image"
+
+
 def list_attachments():
     notes = get_att_notes()
     items = []
     for fn in sorted(os.listdir(ATTACH_DIR)):
         p = os.path.join(ATTACH_DIR, fn)
         if os.path.isfile(p):
-            items.append({"name": fn, "size": os.path.getsize(p), "note": notes.get(fn, "")})
+            items.append({"name": fn, "size": os.path.getsize(p),
+                          "note": notes.get(fn, ""), "kind": preview_kind(fn)})
     return items
 
 
@@ -798,12 +819,53 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return {}
 
+    def _serve_inline(self, path, name):
+        """把文件原样吐给浏览器，不带"下载"标记 —— PDF 就会被浏览器自带的阅读器打开。"""
+        try:
+            with open(path, "rb") as f:
+                data = f.read()
+        except Exception:
+            self.send_error(404)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type",
+                         PREVIEW_TYPES.get(os.path.splitext(name)[1].lower(),
+                                           "application/octet-stream"))
+        self.send_header("Content-Disposition",
+                         "inline; filename*=UTF-8''%s" % quote(name))
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _preview(self, src, key):
+        """网页里预览一个文件。src=att 是附件库，src=merge 是材料合并的暂存区。"""
+        if src == "merge":
+            stored = os.path.basename(str(key or ""))
+            p = os.path.join(MERGE_DIR, stored)
+            shown = stored.split("__", 1)[1] if "__" in stored else stored
+        else:
+            shown = os.path.basename(str(key or ""))
+            p = os.path.join(ATTACH_DIR, shown)
+        if not shown or not os.path.isfile(p):
+            self.send_error(404)
+            return
+        self._serve_inline(p, shown)
+
     # ---------- GET ----------
     def do_GET(self):
-        path = urlparse(self.path).path
+        u = urlparse(self.path)
+        path = u.path
+        qs = parse_qs(u.query)
         try:
             if path == "/" or path == "/index.html":
                 self._file(INDEX_HTML)
+            elif path == "/api/attachments/view":
+                self._preview((qs.get("src") or ["att"])[0], (qs.get("name") or [""])[0])
+            elif path == "/api/jobs/history":
+                jid = (qs.get("id") or [""])[0]
+                logs = [e for e in load_json("sent_log.json", []) if e.get("id") == jid]
+                logs.reverse()
+                self._json({"ok": True, "logs": logs})
             elif path == "/api/state":
                 cfg = get_config()
                 masked = dict(cfg)

@@ -150,6 +150,30 @@
   #toast { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); background: #1f2937; color: #fff; padding: 10px 20px; border-radius: 10px; font-size: 13px; display: none; z-index: 99; }
   .tabpane { display: none; } .tabpane.active { display: block; }
   .empty { text-align: center; color: #9ca3af; padding: 40px 0; font-size: 13px; }
+  /* 表格里点一下就能改 */
+  td.editable { cursor: text; }
+  td.editable:hover { background: #f4f8fd; box-shadow: inset 0 0 0 1px #cfe3f7; }
+  td.editable .cell-hint { color: #d1d5db; }
+  td.editing { background: #fff !important; box-shadow: inset 0 0 0 1px #185fa5 !important; padding: 5px 6px !important; }
+  .cell-input { width: 100%; border: 1px solid #185fa5; border-radius: 6px; padding: 4px 7px; font-size: 13px; font-family: inherit; background: #fff; }
+  .cell-input:focus { outline: none; }
+  /* 附件预览弹窗 */
+  .pv-modal { width: 1080px; max-width: 95vw; height: 88vh; }
+  .pv-body { padding: 0; background: #4b5563; }
+  .pv-body iframe { display: block; width: 100%; height: 100%; border: none; background: #fff; }
+  .pv-body .pv-img-wrap { width: 100%; height: 100%; overflow: auto; display: flex; align-items: center; justify-content: center; }
+  .pv-body .pv-img-wrap img { max-width: 100%; max-height: 100%; }
+  .pv-body .pv-none { color: #fff; text-align: center; line-height: 2.1; padding: 40px 24px; font-size: 13px; }
+  /* 小号文字按钮（预览/记录） */
+  .lnk { background: none; border: none; color: #185fa5; cursor: pointer; font-size: 12px; padding: 2px 4px; font-family: inherit; }
+  .lnk:hover { text-decoration: underline; }
+  .att-item .att-ops { flex: none; display: flex; gap: 6px; }
+  .att-check .att-pv { flex: none; align-self: center; }
+  /* 投递记录弹窗 */
+  .hist .hrow { padding: 10px 0; border-bottom: 1px dashed #f0f1f3; font-size: 13px; line-height: 1.9; }
+  .hist .hrow:last-child { border-bottom: none; }
+  .hist .hok { color: #3b6d11; }
+  .hist .herr { color: #a32d2d; }
 </style>
 </head>
 <body>
@@ -181,7 +205,9 @@
           <option value="">全部进展</option>
           <option>未回音</option><option>笔试</option><option>面试</option><option>Offer</option><option>挂了</option><option>我放弃</option>
         </select>
-        <input type="date" id="fDate" onchange="renderJobs()" title="只看这一天投递的">
+        <input type="date" id="fDateFrom" onchange="renderJobs()" title="投递日期：从这天开始（含这天）">
+        <span class="hint">到</span>
+        <input type="date" id="fDateTo" onchange="renderJobs()" title="投递日期：到这天为止（含这天）">
         <button class="btn" onclick="clearFilters()">清空筛选</button>
         <span class="hint" id="filterCount"></span>
       </div>
@@ -481,6 +507,44 @@
     </div>
   </div>
 </div>
+<!-- 这家公司要发的附件清单 -->
+<div class="overlay" id="attListOverlay">
+  <div class="modal" style="width:460px;">
+    <div class="modal-head">
+      <h3 id="attListTitle">要发的附件</h3>
+      <button class="modal-close" onclick="closeAttList()" title="关闭" aria-label="关闭">×</button>
+    </div>
+    <div class="modal-body" id="attListBody"></div>
+    <div class="modal-foot"><button class="btn" onclick="closeAttList()">关闭</button></div>
+  </div>
+</div>
+
+<!-- 投递记录 -->
+<div class="overlay" id="histOverlay">
+  <div class="modal" style="width:520px;">
+    <div class="modal-head">
+      <h3 id="histTitle">投递记录</h3>
+      <button class="modal-close" onclick="closeHist()" title="关闭" aria-label="关闭">×</button>
+    </div>
+    <div class="modal-body" id="histBody"></div>
+    <div class="modal-foot"><button class="btn" onclick="closeHist()">关闭</button></div>
+  </div>
+</div>
+
+<!-- 附件在线预览（PDF 用浏览器自带阅读器，能放大、翻页、搜索） -->
+<div class="overlay" id="pvOverlay">
+  <div class="modal pv-modal">
+    <div class="modal-head">
+      <h3 id="pvTitle">附件预览</h3>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <a class="btn" id="pvNew" href="#" target="_blank" rel="noopener">↗ 新窗口打开</a>
+        <button class="modal-close" onclick="closePreview()" title="关闭" aria-label="关闭">×</button>
+      </div>
+    </div>
+    <div class="modal-body pv-body" id="pvBody"></div>
+  </div>
+</div>
+
 <input type="file" id="importInput" accept=".xlsx,.xls" style="display:none;">
 <div id="toast"></div>
 
@@ -551,7 +615,57 @@ function renderStat() {
     `<span>面试 <b>${p("面试")}</b></span>` +
     `<span class="off">Offer <b>${p("Offer")}</b></span>`;
 }
-function clearFilters() { $("#fSearch").value = ""; $("#fStatus").value = ""; $("#fProgress").value = ""; $("#fDate").value = ""; renderJobs(); }
+function clearFilters() {
+  $("#fSearch").value = ""; $("#fStatus").value = ""; $("#fProgress").value = "";
+  $("#fDateFrom").value = ""; $("#fDateTo").value = "";
+  renderJobs();
+}
+/* ---------- 表格里直接改：点一下变输入框，回车/点别处保存，Esc 放弃 ---------- */
+const FIELD_CN = { company: "公司", position: "岗位", email: "收件邮箱", note: "备注" };
+function editCell(j, field, cls) {
+  const v = j[field] || "";
+  const body = v ? (field === "company" ? `<b>${esc(v)}</b>` : esc(v))
+                 : `<span class="cell-hint">—</span>`;
+  return `<td class="${cls} editable" data-id="${j.id}" data-field="${field}" data-val="${esc(v)}" ` +
+         `onclick="startInline(this)" title="点一下就能直接改，改完按回车、或点别的地方">${body}</td>`;
+}
+function startInline(td) {
+  if (td.classList.contains("editing")) return;
+  const id = td.dataset.id, field = td.dataset.field, old = td.dataset.val || "";
+  td.classList.add("editing");
+  const input = document.createElement("input");
+  input.className = "cell-input";
+  input.value = old;
+  if (field === "email") input.placeholder = "hr@company.com";
+  input.onclick = e => e.stopPropagation();
+  let closed = false;
+  const finish = save => {
+    if (closed) return;
+    closed = true;
+    if (save) saveInline(id, field, input.value, old);
+    else renderJobs();
+  };
+  input.onkeydown = e => {
+    if (e.key === "Enter") { e.preventDefault(); finish(true); }
+    else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+  };
+  input.onblur = () => finish(true);
+  td.innerHTML = "";
+  td.appendChild(input);
+  input.focus();
+  input.select();
+}
+async function saveInline(id, field, value, old) {
+  const val = (value || "").trim();
+  if (val === (old || "").trim()) { renderJobs(); return; }
+  if (field === "email" && !val.includes("@")) { toast("收件邮箱不对，得有 @ 才行", false); renderJobs(); return; }
+  const r = await api("/api/jobs/update", { id, [field]: val });
+  if (!r.ok) { toast(r.error, false); renderJobs(); return; }
+  const j = JOBS.find(x => x.id === id);
+  if (j) j[field] = val;
+  renderJobs(); refreshPreviewSelect(); renderPreview();
+  toast(`${FIELD_CN[field] || "内容"}已改成：${val || "（空）"}`);
+}
 function setProgress(id, val) {
   const j = JOBS.find(x => x.id === id);
   if (j) j.progress = val;
@@ -560,12 +674,16 @@ function setProgress(id, val) {
 }
 function renderJobs() {
   const kw = ($("#fSearch").value || "").toLowerCase().trim();
-  const fs = $("#fStatus").value, fp = $("#fProgress").value, fd = $("#fDate").value;
+  const fs = $("#fStatus").value, fp = $("#fProgress").value;
+  const dFrom = $("#fDateFrom").value, dTo = $("#fDateTo").value;
   const list = JOBS.filter(j => {
     if (kw && !((j.company + j.position + j.email).toLowerCase().includes(kw))) return false;
     if (fs && j.status !== fs) return false;
     if (fp && j.progress !== fp) return false;
-    if (fd && (j.sent_at || "").slice(0, 10) !== fd) return false;
+    // 只管"发送时间"这一列：填了「从」就只看这天及以后投的，填了「到」就只看这天及以前投的
+    const d = (j.sent_at || "").slice(0, 10);
+    if (dFrom && !(d && d >= dFrom)) return false;
+    if (dTo && !(d && d <= dTo)) return false;
     return true;
   });
   const tb = $("#jobRows");
@@ -586,14 +704,18 @@ function renderJobs() {
     return `
     <tr data-id="${j.id}" class="${du !== null && du >= 0 && du <= 3 ? "soon" : ""}">
       <td><input type="checkbox" class="rowcheck" ${j.status !== "已发送" ? "" : "disabled"} onchange="updateSel()"></td>
-      <td class="wrap"><b>${esc(j.company) || "—"}</b></td>
-      <td class="wrap">${esc(j.position) || "—"}</td>
-      <td>${esc(j.email)}</td>
-      <td class="wrap">${esc(j.note) || ""}</td>
+      ${editCell(j, "company", "wrap")}
+      ${editCell(j, "position", "wrap")}
+      ${editCell(j, "email", "")}
+      ${editCell(j, "note", "wrap")}
       <td>${pgSel}</td>
-      <td>${tags.length ? `<span class="custom-tag" title="该公司使用单独定制的内容">⚡ ${tags.join("·")}</span>` : `<span style="color:#c0c4cc;">全局</span>`}</td>
+      <td>${tags.length
+        ? `<span class="custom-tag" style="cursor:pointer;" onclick="openAttList('${j.id}')" title="点一下看这家要发的附件">⚡ ${tags.join("·")}</span>`
+        : `<span style="color:#c0c4cc;cursor:pointer;" onclick="openAttList('${j.id}')" title="这条用全局模板 + 附件库里的全部附件，点一下看看是哪几个">全局</span>`}</td>
       <td><span class="badge st-${j.status}">${j.status}</span>${j.error ? `<div class="err-text">${esc(j.error)}</div>` : ""}</td>
-      <td style="font-size:12px;color:#6b7280;">${esc(j.sent_at || "")}</td>
+      <td style="font-size:12px;color:#6b7280;">${j.sent_at
+        ? `<span class="lnk" style="font-size:12px;" onclick="openHist('${j.id}')" title="点一下看这家的投递记录">${esc(j.sent_at)}</span>`
+        : "—"}</td>
       <td class="row-actions">
         <button onclick="openEdit('${j.id}')">编辑</button>
         <button class="del" onclick="deleteOne('${j.id}')">删除</button>
@@ -601,7 +723,7 @@ function renderJobs() {
     </tr>`;
   }).join("");
   $("#jobEmpty").style.display = JOBS.length ? "none" : "block";
-  const active = kw || fs || fp || fd;
+  const active = kw || fs || fp || dFrom || dTo;
   $("#filterCount").textContent = active ? `筛出 ${list.length} / 共 ${JOBS.length} 条` : "";
   updateSel();
   renderStat();
@@ -643,6 +765,10 @@ function renderEditAtts(job) {
         <span class="att-name">${esc(a.name)}</span>
         ${a.note ? `<span class="att-note">备注：${esc(a.note)}</span>` : ``}
       </span>
+      ${a.kind && a.kind !== "other"
+        ? `<button class="lnk att-pv" data-name="${esc(a.name)}" title="先看看是哪份文件"
+             onclick="event.preventDefault(); event.stopPropagation(); openPreview(this.dataset.name)">预览</button>`
+        : ""}
       <span class="sz">${(a.size/1024).toFixed(0)} KB</span>
     </label>`;
   }).join("")
@@ -717,7 +843,11 @@ function renderPreview() {
   const body = rep(job.body_override || TEMPLATE.body || "");
   const chosen = (job.atts && job.atts.length) ? job.atts : (ATTS || []).map(a => a.name);
   const attHtml = (ATTS || []).filter(a => chosen.includes(a.name))
-    .map(a => `📄 ${esc(a.name)} <span class="fa">(${(a.size/1024).toFixed(0)} KB)</span>`).join("<br>") || `<span class="fa">（无附件）</span>`;
+    .map(a => `<div style="display:flex;align-items:center;gap:6px;padding:2px 0;">📄 ${esc(a.name)} ` +
+              `<span class="fa">(${(a.size/1024).toFixed(0)} KB)</span>` +
+              (a.kind && a.kind !== "other"
+                ? `<button class="lnk" data-name="${esc(a.name)}" onclick="openPreview(this.dataset.name)">预览</button>` : "") +
+              `</div>`).join("") || `<span class="fa">（无附件）</span>`;
   $("#previewBox").innerHTML = `
     <div class="mh">
       <div><b>发件人</b>${esc(cfg.display_name || cfg.name || "我")} &lt;${esc(cfg.email || "未配置邮箱")}&gt;</div>
@@ -768,7 +898,12 @@ function renderAtt(list) {
                placeholder="点这里写个备注（只有你自己看得到）"
                onchange="saveAttNote(this)">
       </div>
-      <button class="btn danger" style="padding:3px 10px;" data-name="${esc(a.name)}" onclick="delAtt(this)">删除</button>
+      <div class="att-ops">
+        ${a.kind && a.kind !== "other"
+          ? `<button class="btn" style="padding:3px 10px;" data-name="${esc(a.name)}" onclick="openPreview(this.dataset.name)">预览</button>`
+          : ""}
+        <button class="btn danger" style="padding:3px 10px;" data-name="${esc(a.name)}" onclick="delAtt(this)">删除</button>
+      </div>
     </div>`).join("")
     : `<div class="empty">还没有附件，请上传简历 PDF</div>`;
 }
@@ -797,6 +932,77 @@ async function delAtt(btn) {
   ATTS = r.attachments || []; renderAtt(ATTS); renderPreview();
 }
 
+/* ---------- 附件在线预览 ---------- */
+const IMG_EXTS = ["png", "jpg", "jpeg", "gif", "bmp", "webp"];
+const ATT_CN = { pdf: "PDF", image: "图片", other: "这个格式" };
+function previewUrl(key, src) {
+  return "/api/attachments/view?src=" + (src || "att") + "&name=" + encodeURIComponent(key);
+}
+function openPreview(key, src) {
+  if (!key) return;
+  closeAttList();
+  const url = previewUrl(key, src);
+  const name = src === "merge" ? String(key).split("__").pop() : String(key);
+  const ext = (name.split(".").pop() || "").toLowerCase();
+  $("#pvTitle").textContent = "预览：" + name;
+  $("#pvNew").href = url;
+  const body = $("#pvBody");
+  if (IMG_EXTS.includes(ext)) {
+    body.innerHTML = `<div class="pv-img-wrap"><img src="${url}" alt="${esc(name)}"></div>`;
+  } else if (ext === "pdf") {
+    body.innerHTML = `<iframe src="${url}" title="附件预览"></iframe>`;
+  } else {
+    body.innerHTML = `<div class="pv-none">「.${esc(ext || "未知")}」这种格式浏览器打不开，不能在线预览。<br>
+      点右上角「↗ 新窗口打开」，它会保存到你的下载文件夹，用本地软件看。</div>`;
+  }
+  $("#pvOverlay").classList.add("show");
+}
+function closePreview() {
+  $("#pvOverlay").classList.remove("show");
+  $("#pvBody").innerHTML = "";   // 清掉，不然 PDF 还在后台占着
+}
+
+/* ---------- 这家公司要发的附件 ---------- */
+function openAttList(jobId) {
+  const j = JOBS.find(x => x.id === jobId);
+  if (!j) return;
+  const chosen = (j.atts && j.atts.length) ? j.atts : (ATTS || []).map(a => a.name);
+  $("#attListTitle").textContent = "要发给「" + (j.company || j.email) + "」的附件";
+  $("#attListBody").innerHTML = chosen.length ? chosen.map(n => {
+    const a = (ATTS || []).find(x => x.name === n);
+    return `<div class="att-item">
+      <div class="att-main">
+        <div class="att-line">📄 <span class="fname">${esc(n)}</span>
+          <span class="size">${a ? (a.size / 1024).toFixed(0) + " KB" : "文件已不在附件库"}</span></div>
+        ${a && a.note ? `<div style="font-size:12px;color:#185fa5;margin-top:3px;">备注：${esc(a.note)}</div>` : ""}
+      </div>
+      ${a && a.kind && a.kind !== "other"
+        ? `<button class="btn" style="padding:3px 10px;" data-name="${esc(n)}" onclick="openPreview(this.dataset.name)">预览</button>` : ""}
+    </div>`;
+  }).join("")
+    : `<div class="empty">这条没有单独勾选附件，发送时会带上附件库里的全部文件</div>`;
+  $("#attListOverlay").classList.add("show");
+}
+function closeAttList() { $("#attListOverlay").classList.remove("show"); }
+
+/* ---------- 这家公司投过几次 ---------- */
+async function openHist(jobId) {
+  const j = JOBS.find(x => x.id === jobId);
+  if (!j) return;
+  const r = await api("/api/jobs/history?id=" + encodeURIComponent(jobId));
+  const logs = r.logs || [];
+  $("#histTitle").textContent = "投递记录 · " + (j.company || j.email);
+  $("#histBody").innerHTML = logs.length
+    ? `<div class="hist">` + logs.map(e => `
+        <div class="hrow">
+          <div>${esc(e.sent_at || "")} <span class="${e.ok ? "hok" : "herr"}">${e.ok ? "✅ 发送成功" : "❌ 发送失败"}</span></div>
+          <div style="color:#6b7280;">收件人：${esc(e.email || "")}${e.error ? `<br>原因：${esc(e.error)}` : ""}</div>
+        </div>`).join("") + `</div>`
+    : `<div class="empty">这家还没投过</div>`;
+  $("#histOverlay").classList.add("show");
+}
+function closeHist() { $("#histOverlay").classList.remove("show"); }
+
 /* ---------- 材料合并 ---------- */
 async function openMergeTool() {
   const suggest = (CONFIG.name ? CONFIG.name + "-证明材料" : "证明材料") + ".pdf";
@@ -823,6 +1029,7 @@ function renderMerge() {
         <div class="mmeta${f.ok ? "" : " bad"}">${f.ok ? (f.kind === "pdf" ? "PDF" : "图片") + " · " + f.pages + " 页" : "⚠ 这个格式不认识，合成时会跳过"} · ${fmtSize(f.size)}</div>
       </div>
       <div class="mops">
+        <button class="mbtn" data-act="pv" title="预览" ${f.ok ? "" : "disabled"}>👁</button>
         <button class="mbtn" data-act="up" title="上移" ${i === 0 ? "disabled" : ""}>↑</button>
         <button class="mbtn" data-act="down" title="下移" ${i === list.length - 1 ? "disabled" : ""}>↓</button>
         <button class="mbtn del" data-act="del">删除</button>
@@ -840,6 +1047,7 @@ $("#mergeList").addEventListener("click", async e => {
   if (!btn || btn.disabled) return;
   const id = btn.closest(".mrow").dataset.id;
   const act = btn.dataset.act;
+  if (act === "pv") { openPreview(id, "merge"); return; }
   const r = act === "del"
     ? await api("/api/merge/remove", { id })
     : await api("/api/merge/move", { id, dir: act === "up" ? -1 : 1 });
@@ -894,6 +1102,10 @@ async function startSend() {
   const s = await api("/api/start", { ids });
   if (!s.ok) return toast(s.error, false);
   $("#progWrap").classList.add("show");
+  $("#progBar").style.width = "0%";              // 上一轮的进度条要清干净
+  $("#progNum").textContent = "0/" + s.count;
+  $("#progCurrent").textContent = "准备中…";
+  $("#logBox").innerHTML = "";
   toast(`开始投递 ${s.count} 封`);
   startPolling();
 }
@@ -912,6 +1124,10 @@ function startPolling() {
       loadJobs();
     } else {
       clearInterval(pollTimer);
+      // 收尾也要把进度条补到最后进度：轮询有 2.5 秒间隔，最后一封发完时
+      // running 已经变 false，如果这里不补一下，进度条就永远停在 N-1 / N。
+      $("#progBar").style.width = (s.total ? s.done / s.total * 100 : 0) + "%";
+      $("#progNum").textContent = s.done + "/" + s.total;
       $("#progCurrent").textContent = "已结束";
       $("#logBox").innerHTML = s.log.map(l => `<div class="log-${l.level}">[${l.time}] ${esc(l.text)}</div>`).join("");
       $("#logBox").scrollTop = 1e9;
@@ -923,7 +1139,11 @@ function startPolling() {
 
 /* ---------- init ---------- */
 document.addEventListener("keydown", e => {
-  if (e.key === "Escape" && $("#editOverlay").classList.contains("show")) closeEdit();
+  if (e.key !== "Escape") return;
+  if ($("#pvOverlay").classList.contains("show")) return closePreview();
+  if ($("#attListOverlay").classList.contains("show")) return closeAttList();
+  if ($("#histOverlay").classList.contains("show")) return closeHist();
+  if ($("#editOverlay").classList.contains("show")) closeEdit();
 });
 loadState().then(loadJobs);
 </script>

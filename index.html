@@ -178,8 +178,8 @@
   .hist .herr { color: #a32d2d; }
   /* 徽章 / 标签不许被挤成两行 */
   .badge, .custom-tag, .pg-select { white-space: nowrap; }
-  /* 多行输入框：右下角那个小三角 = 按住能往下拖、把框拉大。
-     浏览器原生的太小，这里叠一个更明显的蓝色角标提示用户去拖它。 */
+  /* 多行输入框：右下角那两条斜杠 = 按住能往下拖、把框拉大（浏览器管它叫 resize handle）。
+     原生画得又小又灰，这里叠一个更明显的蓝色斜杠标示出可拖的位置（拖动热点就在那个角上）。 */
   textarea {
     resize: vertical;
     background-image: url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Cg fill='none' stroke='%23185fa5' stroke-width='2.2' stroke-linecap='round'%3E%3Cpath d='M18 6 L6 18'/%3E%3Cpath d='M18 13 L13 18'/%3E%3C/g%3E%3C/svg%3E");
@@ -323,7 +323,7 @@
           <label>邮件正文</label>
           <textarea id="tplBody" placeholder="尊敬的HR：&#10;&#10;您好！我是{学校}{姓名}，…"></textarea>
         </div>
-        <div class="hint" style="margin:-4px 0 10px;">💡 框右下角那个小三角是「拖动柄」：按住它往下拉，框就变高了，写长正文更舒服。拉多了也能再拉回去。</div>
+        <div class="hint" style="margin:-4px 0 10px;">💡 框的右下角有两条小斜杠，按住它往下拖，框就变高（写长正文更舒服）；往上拖能缩回去。</div>
         <div class="hint">可用的变量（点一下插入到光标处，发送时自动替换为每家公司的真实内容）：</div>
         <div class="chips">
           <span class="chip" onclick="insertVar('{公司}')">{公司}</span>
@@ -547,7 +547,7 @@
       <div class="field">
         <label>我的笔记（HR 说了什么、面试反馈、想记的都写这）</label>
         <textarea id="fMyNote" style="height:80px;" placeholder="例如：HR 说两周内给结果；面试官让准备项目介绍"></textarea>
-        <div class="hint" style="margin-top:4px;">💡 框右下角的小三角是拖动柄：按住往下拉能把框拉高（这个弹窗里所有能拖的框都一样）。</div>
+        <div class="hint" style="margin-top:4px;">💡 框的右下角有两条小斜杠，按住往下拖能把框拉高（这个弹窗里能拖的框都长这样）。</div>
       </div>
     </div>
     <div style="border-top:1px dashed #e5e7eb; margin:14px 0 10px; padding-top:12px;">

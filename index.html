@@ -219,6 +219,12 @@
   .tagchip.clickable { cursor: pointer; }
   .tagchip.clickable:hover { background: #dcd8fb; }
   .tagchip.on { background: #534ab7; color: #fff; }
+  /* 一条的标签多于 2 个时，列里折成「＋N」，点开看全部 */
+  .tagchip.more { background: #e6f1fb; color: #185fa5; font-weight: 600; cursor: pointer; }
+  .tagchip.more:hover { background: #cfe3f7; }
+  /* 弹窗里地方大，标签可以长一点、能换行（列里放不下才折起来的） */
+  .tagall .tagchip { max-width: 100%; white-space: normal; word-break: break-word; margin: 3px 5px 3px 0; }
+  .tagall .tagchip:last-child { margin-right: 0; }
   .tagbox { max-width: 148px; }
   .tagnone { border: none; background: none; color: #c0c4cc; cursor: pointer; font-size: 12px;
              padding: 0 3px; font-family: inherit; }
@@ -313,7 +319,7 @@
             <th style="width:118px;">备注</th>
             <th style="width:104px;">标签</th>
             <th style="width:88px;">我的进展</th>
-            <th style="width:92px;">投递定位</th>
+            <th style="width:92px;" title="这一条用哪套话术。写「默认」= 跟随「邮件模板」页里标着 ★ 的那套">投递定位</th>
             <th style="width:68px;">定制</th>
             <th style="width:76px;">状态</th>
             <th style="width:96px;">发送时间</th>
@@ -629,7 +635,9 @@
     </div>
     <div class="field"><label>收件邮箱</label><input id="fEmail" placeholder="hr@company.com"></div>
     <div class="field"><label>备注（可选，可用变量 {备注} 引用）</label><input id="fNote" placeholder="例如：要求压缩包投递、命名格式等"></div>
-    <div class="field"><label>标签（可选，只给你自己看，不会发给 HR；多个用逗号隔开）</label><input id="fTags" placeholder="例如：9/19晚投，国企"></div>
+    <div class="field"><label>标签（可选，只给你自己看，不会发给 HR；多个用逗号隔开）</label><input id="fTags" placeholder="例如：9/19晚投，国企">
+      <div class="hint" style="margin-top:4px;">标签只放<b>短词</b>：投递批次、行业、渠道、优先级这种。一条最多 12 个，写长了会被当成好几个标签切碎，多的还存不进去。</div>
+    </div>
     <div style="border-top:1px dashed #e5e7eb; margin:14px 0 10px; padding-top:12px;">
       <b style="font-size:13px; color:#0c447c;">我的求职进展（自己随时改，跟发送无关）</b>
       <div class="grid" style="grid-template-columns:1fr 1fr; gap:10px; margin-top:8px;">
@@ -695,6 +703,24 @@
   </div>
 </div>
 
+<!-- 一条的全部标签（清单里那列放不下，折成「＋N」后点开看） -->
+<div class="overlay" id="tagListOverlay">
+  <div class="modal" style="width:500px;">
+    <div class="modal-head">
+      <h3 id="tagListTitle">全部标签</h3>
+      <button class="modal-close" onclick="closeTagList()" title="关闭" aria-label="关闭">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="hint" style="margin-bottom:10px;">点任意一个标签 → 清单就只显示带它的条目（再点一次取消）。</div>
+      <div class="tagall" id="tagListBody"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeTagList()">关闭</button>
+      <button class="btn primary" id="tagListEditBtn">改这条的标签</button>
+    </div>
+  </div>
+</div>
+
 <!-- 附件在线预览（PDF 用浏览器自带阅读器，能放大、翻页、搜索） -->
 <div class="overlay" id="pvOverlay">
   <div class="modal pv-modal">
@@ -730,8 +756,8 @@
     </div>
     <div class="modal-foot" style="justify-content:space-between; align-items:center;">
       <div style="display:flex; align-items:center; gap:8px;">
-        <span class="hint" style="white-space:nowrap;">这批打标签</span>
-        <input class="tag-input" id="sheetTags" placeholder="例如：9/19晚投，国企（可留空）">
+        <span class="hint" style="white-space:nowrap;">这批打标签<span style="color:#c0c4cc;">（短词，别粘长句）</span></span>
+        <input class="tag-input" id="sheetTags" placeholder="例如：9/17下午投，国企（可留空）">
       </div>
       <div style="display:flex; gap:8px;">
         <button class="btn" onclick="closeSheet()">关闭</button>
@@ -990,6 +1016,11 @@ function allTags() {
   JOBS.forEach(j => (j.tags || []).forEach(t => { if (t && !seen.includes(t)) seen.push(t); }));
   return seen;
 }
+/* 清单上方那排标签：默认只铺前 14 个，多的收起来，免得占掉半屏 */
+const TAGBAR_SHOW = 14;
+let TAGBAR_EXPAND = false;
+function expandTagBar() { TAGBAR_EXPAND = true; refreshTagUI(); }
+function collapseTagBar() { TAGBAR_EXPAND = false; refreshTagUI(); }
 function refreshTagUI() {
   const tags = allTags(), cur = $("#fTag").value;
   $("#fTag").innerHTML = `<option value="">全部标签</option>` +
@@ -1000,41 +1031,81 @@ function refreshTagUI() {
   const bar = $("#tagBar"), now = $("#fTag").value;
   bar.style.display = tags.length ? "flex" : "none";
   if (!tags.length) return;
-  bar.innerHTML = `<span class="tb-label">标签：</span>` +
-    tags.map(t => `<span class="tagchip clickable${now === t ? " on" : ""}" data-tag="${esc(t)}" ` +
+  // 正在筛的那个标签必须露出来，不然勾了看不见
+  if (!TAGBAR_EXPAND && now && !tags.slice(0, TAGBAR_SHOW).includes(now)) TAGBAR_EXPAND = true;
+  const show = TAGBAR_EXPAND ? tags : tags.slice(0, TAGBAR_SHOW);
+  const rest = tags.length - show.length;
+  bar.innerHTML = `<span class="tb-label">标签（共 ${tags.length} 个）：</span>` +
+    show.map(t => `<span class="tagchip clickable${now === t ? " on" : ""}" data-tag="${esc(t)}" ` +
                   `onclick="filterByTag(this.dataset.tag)" title="点一下只看带这个标签的">${esc(t)}</span>`).join("") +
+    (rest > 0 ? `<button class="tagnone" onclick="expandTagBar()" title="标签太多了，展开看全部">…展开（还有 ${rest} 个）</button>` : "") +
+    (TAGBAR_EXPAND && tags.length > TAGBAR_SHOW ? `<button class="tagnone" onclick="collapseTagBar()">收起</button>` : "") +
     (now ? `<button class="tagnone" onclick="filterByTag('')" title="取消标签筛选">✕ 取消</button>` : "");
 }
 function filterByTag(t) {
   $("#fTag").value = (t && t === $("#fTag").value) ? "" : (t || "");
   renderJobs();
 }
+/* 清单里一条最多直接显示 2 个标签，多的折成「＋N」——不然标签一多，
+   这一列会被撑成一大坨，还得往下滚才看得见（想全看就点 ＋N）。 */
+const TAG_SHOW = 2;
 function tagCell(j) {
   const ts = j.tags || [];
-  return ts.map(t => `<span class="tagchip clickable" data-tag="${esc(t)}" ` +
-                     `onclick="filterByTag(this.dataset.tag)" title="点一下只看带这个标签的">${esc(t)}</span>`).join("") +
-    `<button class="tagnone" data-id="${j.id}" onclick="editTags(this.dataset.id)" ` +
+  const edit = `<button class="tagnone" data-id="${j.id}" onclick="editTags(this.dataset.id)" ` +
     `title="${ts.length ? "改这条的标签" : "给这条打标签"}">${ts.length ? "✎" : "＋标签"}</button>`;
+  if (!ts.length) return edit;
+  const head = ts.slice(0, TAG_SHOW);
+  const rest = ts.length - head.length;
+  return head.map(t => `<span class="tagchip clickable" data-tag="${esc(t)}" ` +
+                       `onclick="filterByTag(this.dataset.tag)" title="点一下只看带这个标签的">${esc(t)}</span>`).join("")
+    + (rest > 0
+        ? `<span class="tagchip more" data-id="${j.id}" onclick="showAllTags(this.dataset.id)" ` +
+          `title="这条一共 ${ts.length} 个标签，点开看全部">＋${rest}</span>`
+        : "")
+    + edit;
 }
+/* 点「＋N」看这条的全部标签 */
+function showAllTags(id) {
+  const j = JOBS.find(x => x.id === id);
+  if (!j) return;
+  const ts = j.tags || [];
+  $("#tagListTitle").textContent = "全部标签 · " + (j.company || j.email || "") + "（" + ts.length + " 个）";
+  $("#tagListBody").innerHTML = ts.map(t =>
+    `<span class="tagchip clickable" data-tag="${esc(t)}" onclick="pickTag(this.dataset.tag)" ` +
+    `title="点一下只看带这个标签的">${esc(t)}</span>`).join("")
+    || `<div class="empty" style="padding:20px 0;">这条还没有标签</div>`;
+  $("#tagListEditBtn").onclick = () => { closeTagList(); editTags(id); };
+  $("#tagListOverlay").classList.add("show");
+}
+function pickTag(t) { closeTagList(); filterByTag(t); }
+function closeTagList() { $("#tagListOverlay").classList.remove("show"); }
+// 一条最多几个标签（后端说了算，loadState 时取回来）
+let MAX_TAGS = 12;
+// 打标签时超出上限，统一用这句话告诉用户 —— 以前是默默丢掉的
+function droppedNote(n) {
+  return n ? `；有 ${n} 个超出上限没存进去（一条最多 ${MAX_TAGS} 个标签）` : "";
+}
+const TAG_TIP = () => `\n\n标签只放短词（比如「9/19晚投」「国企」「内推」）。一条最多 ${MAX_TAGS} 个，` +
+  `长句子粘进来会被逗号空格切成好几段、多的还存不进去。`;
 async function editTags(id) {
   const j = JOBS.find(x => x.id === id); if (!j) return;
-  const v = prompt(`给「${j.company || j.email}」打标签\n（多个标签用逗号隔开；清空 = 去掉这条的标签）`,
+  const v = prompt(`给「${j.company || j.email}」打标签\n（多个标签用逗号隔开；清空 = 去掉这条的标签）` + TAG_TIP(),
                    (j.tags || []).join("，"));
   if (v === null) return;
   const r = await api("/api/jobs/tag", { ids: [id], tags: v, mode: "set" });
   if (!r.ok) return toast(r.error, false);
   await loadJobs();
-  toast("标签已保存");
+  toast("标签已保存" + droppedNote(r.tags_dropped));
 }
 async function tagSelected() {
   const ids = selectedIds();
   if (!ids.length) return toast("先在清单左边勾选要打标签的条目", false);
-  const v = prompt(`给选中的 ${ids.length} 条打标签\n（多个标签用逗号隔开，例如：9/19晚投，国企）`, "");
+  const v = prompt(`给选中的 ${ids.length} 条打标签\n（多个标签用逗号隔开，例如：9/19晚投，国企）` + TAG_TIP(), "");
   if (v === null || !v.trim()) return;
   const r = await api("/api/jobs/tag", { ids, tags: v, mode: "add" });
   if (!r.ok) return toast(r.error, false);
   await loadJobs();
-  toast(`已给 ${r.count} 条打上标签`);
+  toast(`已给 ${r.count} 条打上标签` + droppedNote(r.tags_dropped));
 }
 async function clearTagOne() {
   const tags = allTags();
@@ -1112,9 +1183,16 @@ async function saveEdit() {
   if (!data.email.includes("@")) return toast("收件邮箱格式不正确", false);
   const hasAttLib = (ATTS || []).length > 0;
   if (hasAttLib && !data.atts.length) return toast("至少勾选一个附件（求职邮件要带简历）", false);
-  if (EDIT_ID) { await api("/api/jobs/update", { id: EDIT_ID, ...data }); }
-  else { const r = await api("/api/jobs/add", data); if (!r.ok) return toast(r.error, false); }
-  closeEdit(); toast("已保存"); loadJobs();
+  let dropped = 0;
+  if (EDIT_ID) {
+    const r = await api("/api/jobs/update", { id: EDIT_ID, ...data });
+    dropped = r.tags_dropped || 0;
+  } else {
+    const r = await api("/api/jobs/add", data);
+    if (!r.ok) return toast(r.error, false);
+    dropped = r.tags_dropped || 0;
+  }
+  closeEdit(); toast("已保存" + droppedNote(dropped)); loadJobs();
 }
 async function deleteOne(id) { if (!confirm("确定删除这一条投递目标？")) return; await api("/api/jobs/delete", { ids: [id] }); loadJobs(); }
 async function deleteSelected() {
@@ -1134,7 +1212,7 @@ $("#importInput").onchange = async e => {
   const r = await api("/api/jobs/import", { data: b64 });
   e.target.value = "";
   if (!r.ok) return toast(r.error, false);
-  toast(`导入完成：新增 ${r.added} 条${r.skipped ? `，跳过重复 ${r.skipped} 条` : ""}${r.invalid ? `，无效邮箱 ${r.invalid} 条` : ""}${r.tpl_miss ? `；有 ${r.tpl_miss} 条写的投递定位对不上模板名，已按默认处理` : ""}`);
+  toast(`导入完成：新增 ${r.added} 条${r.skipped ? `，跳过重复 ${r.skipped} 条` : ""}${r.invalid ? `，无效邮箱 ${r.invalid} 条` : ""}${r.tpl_miss ? `；有 ${r.tpl_miss} 条写的投递定位对不上模板名，已按默认处理` : ""}${droppedNote(r.tags_dropped)}`);
   loadJobs();
 };
 
@@ -1143,11 +1221,11 @@ function tplById(id) { return (TPLS.list || []).find(t => t.id === id) || null; 
 function defaultTpl() { return tplById(TPLS.default_id) || (TPLS.list || [])[0] || null; }
 function curTpl() { return tplById(TPL_CUR) || defaultTpl(); }
 function tplName(id) { const t = tplById(id); return t ? t.name : ""; }
-// 清单那一列里「默认」怎么显示：默认那套就叫「默认」就显示俩字，否则把名字带上
+// 清单那一列里「跟着默认走」时显示什么。
+// 就写「默认」俩字 —— 列只有 92px，写成「默认·专业对口」会被截成「默认·专业对□」，反而看不懂。
+// 默认到底是哪套：鼠标放上去有提示，或者去「邮件模板」页看标着 ★ 的那套。
 function dftLabel() {
-  const d = defaultTpl();
-  if (!d) return "默认";
-  return d.name === "默认" ? "默认" : "默认·" + d.name;
+  return "默认";
 }
 function renderTplPick() {
   const sel = $("#tplPick");
@@ -1330,6 +1408,7 @@ async function loadState() {
   const r = await api("/api/state");
   CONFIG = r.config || {};
   TPLS = r.templates || { list: [], default_id: "" };
+  MAX_TAGS = r.max_tags || 12;
   if (!tplById(TPL_CUR)) TPL_CUR = TPLS.default_id || ((TPLS.list || [])[0] || {}).id || "";
   ATTS = r.attachments || [];
   $("#cfgEmail").value = CONFIG.email || "";
@@ -1795,6 +1874,7 @@ async function importSelection() {
   let m = `导入完成：新增 ${r.added} 条`;
   if (r.skipped) m += `，跳过重复 ${r.skipped} 条`;
   if (r.invalid) m += `，${r.invalid} 条没邮箱被丢掉`;
+  m += droppedNote(r.tags_dropped);
   toast(m);
   if (r.added) $("#sheetTags").value = "";
   await loadJobs();
@@ -1873,6 +1953,7 @@ document.addEventListener("keydown", e => {
   if ($("#sheetOverlay").classList.contains("show")) return closeSheet();
   if ($("#pvOverlay").classList.contains("show")) return closePreview();
   if ($("#attListOverlay").classList.contains("show")) return closeAttList();
+  if ($("#tagListOverlay").classList.contains("show")) return closeTagList();
   if ($("#histOverlay").classList.contains("show")) return closeHist();
   if ($("#editOverlay").classList.contains("show")) closeEdit();
 });

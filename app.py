@@ -257,12 +257,15 @@ def render(tpl_text, job, cfg):
 
 
 # ---------------------------------------------------------------- 标签
-def norm_tags(v):
-    """把标签统一成去重后的列表。
+def split_tags(v, limit=None):
+    """把标签统一成去重后的列表，顺便告诉你被挤掉几个。
 
     前端传列表 ["9/19投", "国企"] 或字符串 "9/19投,国企" 都能收。
-    逗号（中英文）、分号、空格都当分隔符；最多留 MAX_TAGS_PER_JOB 个。
+    逗号（中英文）、分号、空格都当分隔符。
+    返回 (要存的标签, 被挤掉的个数) —— 第二条是给界面提示用的：
+    以前超了就默默丢掉，用户以为"没显示"，其实是压根没存进去。
     """
+    limit = MAX_TAGS_PER_JOB if limit is None else limit
     if isinstance(v, (list, tuple)):
         raw = " ".join(str(x) for x in v)
     else:
@@ -272,7 +275,12 @@ def norm_tags(v):
         p = p.strip()
         if p and p not in out:
             out.append(p)
-    return out[:MAX_TAGS_PER_JOB]
+    return out[:limit], max(0, len(out) - limit)
+
+
+def norm_tags(v):
+    """只要标签列表、不关心被挤掉几个的时候用这个。"""
+    return split_tags(v)[0]
 
 
 def tag_all():
@@ -933,7 +941,7 @@ def excel_import(b64_data, tags=None):
         header_map = {"company": 1, "position": 2, "email": 3, "note": 4}
         start_row = 2 if _looks_like_header([c.value for c in ws[1]]) else 1
 
-    tags = norm_tags(tags)
+    tags, tags_dropped = split_tags(tags)
     jobs = get_jobs()
     existing = {(j.get("email"), j.get("position"), j.get("company")) for j in jobs}
     tpls = get_templates()
@@ -966,7 +974,8 @@ def excel_import(b64_data, tags=None):
         else:
             added += 1
     save_jobs(jobs)
-    return {"added": added, "skipped": skipped, "invalid": bad, "tpl_miss": tpl_miss}
+    return {"added": added, "skipped": skipped, "invalid": bad, "tpl_miss": tpl_miss,
+            "tags_dropped": tags_dropped}
 
 
 def import_rows(rows, tags=None):
@@ -980,7 +989,7 @@ def import_rows(rows, tags=None):
     if not isinstance(rows, list) or not rows:
         raise ValueError("没有选中任何内容，先在表格里框一块区域")
 
-    tags = norm_tags(tags)
+    tags, tags_dropped = split_tags(tags)
     jobs = get_jobs()
     existing = {(j.get("email"), j.get("position"), j.get("company")) for j in jobs}
     added, skipped, bad, header_skip = 0, 0, 0, 0
@@ -1003,7 +1012,8 @@ def import_rows(rows, tags=None):
         else:
             added += 1
     save_jobs(jobs)
-    return {"added": added, "skipped": skipped, "invalid": bad, "header_skipped": header_skip}
+    return {"added": added, "skipped": skipped, "invalid": bad, "header_skipped": header_skip,
+            "tags_dropped": tags_dropped}
 
 
 # ---------------------------------------------------------------- 在线填表草稿
@@ -1155,6 +1165,7 @@ class Handler(BaseHTTPRequestHandler):
                     "ok": True,
                     "config": masked,
                     "templates": get_templates(),
+                    "max_tags": MAX_TAGS_PER_JOB,
                     "send": {k: SEND_STATE[k] for k in ("running", "stop", "current", "done", "total")},
                     "today_sent": today_sent_count(),
                     "daily_limit": cfg.get("daily_limit", 50),
@@ -1322,13 +1333,14 @@ class Handler(BaseHTTPRequestHandler):
                 })
             elif path == "/api/jobs/add":
                 jobs = get_jobs()
+                job_tags, tags_dropped = split_tags(body.get("tags"))
                 job = {
                     "id": "j%d" % int(time.time() * 1000),
                     "company": str(body.get("company", "")).strip(),
                     "position": str(body.get("position", "")).strip(),
                     "email": str(body.get("email", "")).strip(),
                     "note": str(body.get("note", "")).strip(),
-                    "tags": norm_tags(body.get("tags")),
+                    "tags": job_tags,
                     "template_id": str(body.get("template_id") or "").strip(),
                     "subject_override": str(body.get("subject_override", "")).strip(),
                     "body_override": str(body.get("body_override", "")),
@@ -1343,10 +1355,11 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 jobs.append(job)
                 save_jobs(jobs)
-                self._json({"ok": True, "job": job})
+                self._json({"ok": True, "job": job, "tags_dropped": tags_dropped})
             elif path == "/api/jobs/update":
                 jobs = get_jobs()
                 jid = body.get("id")
+                tags_dropped = 0
                 for j in jobs:
                     if j["id"] == jid:
                         for k in ("company", "position", "email", "note", "subject_override",
@@ -1359,10 +1372,11 @@ class Handler(BaseHTTPRequestHandler):
                         if "atts" in body:
                             j["atts"] = [str(a) for a in (body.get("atts") or [])]
                         if "tags" in body:
-                            j["tags"] = norm_tags(body.get("tags"))
+                            new_tags, tags_dropped = split_tags(body.get("tags"))
+                            j["tags"] = new_tags
                         break
                 save_jobs(jobs)
-                self._json({"ok": True})
+                self._json({"ok": True, "tags_dropped": tags_dropped})
             elif path == "/api/jobs/delete":
                 ids = set(body.get("ids", []))
                 jobs = [j for j in get_jobs() if j["id"] not in ids]
@@ -1385,7 +1399,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not ids:
                     self._json({"ok": False, "error": "先勾选要打标签的条目"})
                     return
-                want = norm_tags(body.get("tags"))
+                want, tags_dropped = split_tags(body.get("tags"))
                 mode = str(body.get("mode", "add"))
                 if mode in ("add", "remove") and not want:
                     self._json({"ok": False, "error": "先写要打的标签（多个用逗号隔开）"})
@@ -1409,7 +1423,8 @@ class Handler(BaseHTTPRequestHandler):
                     j["tags"] = cur
                     hit += 1
                 save_jobs(jobs)
-                self._json({"ok": True, "count": hit, "all_tags": tag_all()})
+                self._json({"ok": True, "count": hit, "all_tags": tag_all(),
+                            "tags_dropped": tags_dropped, "max_tags": MAX_TAGS_PER_JOB})
             elif path == "/api/sheet":
                 rows = sheet_save(body.get("rows"))
                 self._json({"ok": True, "rows": rows})

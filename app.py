@@ -10,6 +10,7 @@ import base64
 import io
 import json
 import os
+import re
 import shutil
 import smtplib
 import socket
@@ -34,6 +35,12 @@ ATTACH_DIR = os.path.join(BASE, "attachments")
 INDEX_HTML = os.path.join(BASE, "index.html")
 
 ATT_NOTE_FILE = "attachment_notes.json"   # {文件名: 备注文字}，备注只存在本机，不会随邮件发出
+SHEET_FILE = "sheet_draft.json"           # 在线填表的草稿，关掉软件再打开还在
+
+# 在线填表 / 按列导入 的列顺序：第1列公司、第2列岗位、第3列收件邮箱、第4列备注
+SHEET_COLS = ["company", "position", "email", "note"]
+SHEET_COLS_CN = ["公司", "岗位", "收件邮箱", "备注"]
+MAX_TAGS_PER_JOB = 12                     # 一条最多几个标签，防止乱填撑爆界面
 
 # ---------------------------------------------------------------- 材料合并
 # 暂存区：用户丢进来的证明材料先放这儿，排好顺序再合成。
@@ -121,6 +128,8 @@ def init_dirs():
         save_json("sent_log.json", [])
     if not os.path.exists(_path(ATT_NOTE_FILE)):
         save_json(ATT_NOTE_FILE, {})
+    if not os.path.exists(_path(SHEET_FILE)):
+        save_json(SHEET_FILE, {"rows": [], "updated_at": ""})
 
 
 def get_config():
@@ -169,6 +178,35 @@ def render(tpl_text, job, cfg):
     for k, v in mapping.items():
         out = out.replace(k, v)
     return out
+
+
+# ---------------------------------------------------------------- 标签
+def norm_tags(v):
+    """把标签统一成去重后的列表。
+
+    前端传列表 ["9/19投", "国企"] 或字符串 "9/19投,国企" 都能收。
+    逗号（中英文）、分号、空格都当分隔符；最多留 MAX_TAGS_PER_JOB 个。
+    """
+    if isinstance(v, (list, tuple)):
+        raw = " ".join(str(x) for x in v)
+    else:
+        raw = str(v or "")
+    out = []
+    for p in re.split(r"[,，;；\s]+", raw):
+        p = p.strip()
+        if p and p not in out:
+            out.append(p)
+    return out[:MAX_TAGS_PER_JOB]
+
+
+def tag_all():
+    """清单里用过的所有标签，给筛选下拉框用。"""
+    seen = []
+    for j in get_jobs():
+        for t in (j.get("tags") or []):
+            if t and t not in seen:
+                seen.append(t)
+    return seen
 
 
 # ---------------------------------------------------------------- 邮件发送
@@ -695,7 +733,7 @@ def excel_export_bytes():
     wb = Workbook()
     ws = wb.active
     ws.title = "投递记录"
-    headers = ["公司", "岗位", "收件邮箱", "备注", "状态", "发送时间", "失败原因",
+    headers = ["公司", "岗位", "收件邮箱", "备注", "标签", "状态", "发送时间", "失败原因",
                "我的进展", "重要日期", "我的笔记"]
     fills = PatternFill("solid", fgColor="185FA5")
     for c, h in enumerate(headers, 1):
@@ -704,11 +742,12 @@ def excel_export_bytes():
         cell.fill = fills
     for r, j in enumerate(get_jobs(), 2):
         row = [j.get("company"), j.get("position"), j.get("email"), j.get("note"),
+               "，".join(j.get("tags") or []),
                j.get("status"), j.get("sent_at", ""), j.get("error", ""),
                j.get("progress", "未回音"), j.get("event_date", ""), j.get("mynote", "")]
         for c, v in enumerate(row, 1):
             ws.cell(row=r, column=c, value=v)
-    widths = [24, 20, 34, 28, 10, 20, 36, 12, 14, 40]
+    widths = [24, 20, 34, 28, 18, 10, 20, 36, 12, 14, 40]
     for i, w in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
     buf = io.BytesIO()
@@ -716,7 +755,65 @@ def excel_export_bytes():
     return buf.getvalue()
 
 
-def excel_import(b64_data):
+def _cell_text(v):
+    """把 Excel 单元格的值变成纯文字。日期单独处理，不然会读成 2026-09-16 00:00:00。"""
+    if v is None:
+        return ""
+    if isinstance(v, datetime):
+        return v.strftime("%Y-%m-%d")
+    return str(v).strip()
+
+
+# 常见表头写法。用来认「这一行是不是表头」，要求整行每个格子都命中才认，
+# 免得把「中铁九局 / 试验检测」这种真实数据误当成表头吃掉。
+HEADER_WORDS = {
+    "公司", "公司名称", "企业", "企业名称", "单位", "单位名称", "用人单位",
+    "岗位", "岗位名称", "职位", "职位名称", "职务", "应聘岗位", "招聘岗位",
+    "收件邮箱", "邮箱", "邮箱地址", "电子邮箱", "邮件", "投递邮箱", "email", "mail", "e-mail",
+    "备注", "说明", "备注说明", "其他", "序号",
+}
+
+
+def _looks_like_header(vals):
+    """判断一行是不是表头：每个格子都是「公司 / 岗位 / 邮箱 / 备注」这类通用词，且都不含 @。"""
+    cells = [(_cell_text(v) or "").strip().lower() for v in vals]
+    cells = [c for c in cells if c]
+    if not cells:
+        return False
+    if any("@" in c for c in cells):
+        return False
+    return all(c in HEADER_WORDS for c in cells)
+
+
+def _append_job(jobs, existing, company, position, email, note, tags,
+                progress="", event_date="", mynote=""):
+    """把一行数据变成清单条目。返回 "added"（新增）或 "dup"（重复，跳过）。"""
+    key = (email, position, company)
+    if key in existing:
+        return "dup"
+    existing.add(key)
+    jobs.append({
+        "id": "j%d%03d" % (int(time.time() * 1000), len(jobs) % 1000),
+        "company": company, "position": position, "email": email, "note": note,
+        "tags": list(tags or []),
+        "subject_override": "", "body_override": "", "atts": [],
+        "progress": progress if progress in ("未回音", "笔试", "面试", "Offer", "挂了", "我放弃") else "未回音",
+        "event_date": event_date,
+        "mynote": mynote,
+        "status": "待发", "error": "", "sent_at": "",
+    })
+    return "added"
+
+
+def excel_import(b64_data, tags=None):
+    """导入 Excel 文件（一键入口：选完文件直接导）。
+
+    认得出表头（含「公司/岗位/邮箱/备注」）就按表头对列；
+    认不出表头也不报错，改成按列顺序硬认 —— 第1列公司、第2列岗位、第3列收件邮箱、第4列备注。
+    所以「没写表头、直接从数据开始」的表也能导进来。
+
+    tags 会打给这一批新导入的条目（可为空）。
+    """
     from openpyxl import load_workbook
     raw = base64.b64decode(b64_data)
     wb = load_workbook(io.BytesIO(raw), data_only=True)
@@ -724,7 +821,7 @@ def excel_import(b64_data):
 
     header_map = {}
     for cell in ws[1]:
-        v = str(cell.value or "").strip()
+        v = _cell_text(cell.value)
         if not v:
             continue
         if "公司" in v or "企业" in v:
@@ -741,42 +838,119 @@ def excel_import(b64_data):
             header_map["event_date"] = cell.column
         elif "笔记" in v:
             header_map["mynote"] = cell.column
-    if "email" not in header_map or ("company" not in header_map and "position" not in header_map):
-        raise ValueError("表头无法识别：需要包含「公司/岗位/收件邮箱」列，请使用下载的模板填写")
 
+    if "email" in header_map and ("company" in header_map or "position" in header_map):
+        start_row = 2                                  # 表头认出来了，数据从第 2 行开始
+    else:
+        header_map = {"company": 1, "position": 2, "email": 3, "note": 4}
+        start_row = 2 if _looks_like_header([c.value for c in ws[1]]) else 1
+
+    tags = norm_tags(tags)
     jobs = get_jobs()
     existing = {(j.get("email"), j.get("position"), j.get("company")) for j in jobs}
     added, skipped, bad = 0, 0, 0
-    for row in ws.iter_rows(min_row=2):
-        vals = {k: (str(row[c - 1].value or "").strip() if c - 1 < len(row) else "")
+    for row in ws.iter_rows(min_row=start_row):
+        vals = {k: (_cell_text(row[c - 1].value) if 1 <= c <= len(row) else "")
                 for k, c in header_map.items()}
         company = vals.get("company", "")
         position = vals.get("position", "")
         email = vals.get("email", "")
         note = vals.get("note", "")
-        if not email and not company and not position:
+        if not company and not position and not email and not note:
+            continue                                   # 整行空着，跳过
+        if "@" not in email:
+            bad += 1                                   # 没有邮箱，发不了，算无效
+            continue
+        r = _append_job(jobs, existing, company, position, email, note, tags,
+                        vals.get("progress", ""), vals.get("event_date", ""), vals.get("mynote", ""))
+        if r == "dup":
+            skipped += 1
+        else:
+            added += 1
+    save_jobs(jobs)
+    return {"added": added, "skipped": skipped, "invalid": bad}
+
+
+def import_rows(rows, tags=None):
+    """在线填表用：按你框选的那块区域导入。
+
+    列的顺序固定 —— 第1列公司、第2列岗位、第3列收件邮箱、第4列备注。
+    框了几列就认几列（少填的列留空），第 5 列往后不看。
+    框进去的第一行如果长得像表头（写着「公司/岗位/邮箱」），自动跳过。
+    tags 会打给这一批。
+    """
+    if not isinstance(rows, list) or not rows:
+        raise ValueError("没有选中任何内容，先在表格里框一块区域")
+
+    tags = norm_tags(tags)
+    jobs = get_jobs()
+    existing = {(j.get("email"), j.get("position"), j.get("company")) for j in jobs}
+    added, skipped, bad, header_skip = 0, 0, 0, 0
+
+    for i, raw in enumerate(rows):
+        vals = [(raw[c] if isinstance(raw, list) and c < len(raw) else "") for c in range(len(SHEET_COLS))]
+        vals = [_cell_text(v) for v in vals]
+        if not header_skip and i < 3 and _looks_like_header(vals):
+            header_skip = 1                            # 框进来的表头行，自动跳过（最多跳一行）
+            continue
+        company, position, email, note = vals
+        if not any(vals):
             continue
         if "@" not in email:
             bad += 1
             continue
-        key = (email, position, company)
-        if key in existing:
+        r = _append_job(jobs, existing, company, position, email, note, tags)
+        if r == "dup":
             skipped += 1
-            continue
-        existing.add(key)
-        progress = vals.get("progress", "").strip()
-        jobs.append({
-            "id": "j%d" % int(time.time() * 1000) + str(added),
-            "company": company, "position": position, "email": email, "note": note,
-            "subject_override": "", "body_override": "", "atts": [],
-            "progress": progress if progress in ("未回音", "笔试", "面试", "Offer", "挂了", "我放弃") else "未回音",
-            "event_date": vals.get("event_date", "").strip(),
-            "mynote": vals.get("mynote", ""),
-            "status": "待发", "error": "", "sent_at": "",
-        })
-        added += 1
+        else:
+            added += 1
     save_jobs(jobs)
-    return {"added": added, "skipped": skipped, "invalid": bad}
+    return {"added": added, "skipped": skipped, "invalid": bad, "header_skipped": header_skip}
+
+
+# ---------------------------------------------------------------- 在线填表草稿
+SHEET_MAX_ROWS = 400
+SHEET_MAX_COLS = 8
+
+
+def sheet_load():
+    """读回上次没导完的在线表格内容。"""
+    d = load_json(SHEET_FILE, {})
+    rows = d.get("rows") if isinstance(d, dict) else None
+    if not isinstance(rows, list):
+        rows = []
+    out = []
+    for r in rows[:SHEET_MAX_ROWS]:
+        if not isinstance(r, list):
+            continue
+        out.append([str(c) if c is not None else "" for c in r[:SHEET_MAX_COLS]])
+    stamp = d.get("updated_at", "") if isinstance(d, dict) else ""
+    return {"rows": out, "updated_at": stamp or ""}
+
+
+def sheet_save(rows):
+    """把在线表格的内容存下来（纯草稿，不影响清单）。"""
+    clean = []
+    for r in (rows or [])[:SHEET_MAX_ROWS]:
+        if not isinstance(r, list):
+            continue
+        clean.append([str(c)[:500] if c is not None else "" for c in r[:SHEET_MAX_COLS]])
+    save_json(SHEET_FILE, {"rows": clean, "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
+    return clean
+
+
+def parse_xlsx(b64_data):
+    """把 Excel 文件读成一张纯文字的二维表，铺进网页里的在线表格让你看/改。"""
+    from openpyxl import load_workbook
+    raw = base64.b64decode(b64_data)
+    wb = load_workbook(io.BytesIO(raw), data_only=True)
+    ws = wb.active
+    rows = []
+    for r in ws.iter_rows(max_row=SHEET_MAX_ROWS):
+        rows.append([_cell_text(c.value) for c in r[:SHEET_MAX_COLS]])
+    while rows and not any(rows[-1]):
+        rows.pop()                                     # 去掉末尾的空行
+    return rows
 
 
 # ---------------------------------------------------------------- HTTP 服务
@@ -804,6 +978,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         self.send_response(200)
         self.send_header("Content-Type", ctype)
+        if not download_name:
+            # 页面本身不缓存：改完代码按一下刷新就能看到新的，不用清缓存
+            self.send_header("Cache-Control", "no-store, must-revalidate")
         if download_name:
             self.send_header("Content-Disposition",
                              "attachment; filename*=UTF-8''%s" % quote(download_name))
@@ -892,6 +1069,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._file_bytes(excel_template_bytes(), "简历投递清单模板.xlsx")
             elif path == "/api/jobs/export":
                 self._file_bytes(excel_export_bytes(), "投递记录导出.xlsx")
+            elif path == "/api/sheet":
+                self._json({"ok": True, **sheet_load(), "all_tags": tag_all()})
             elif path == "/api/status":
                 self._json({
                     "ok": True,
@@ -974,6 +1153,7 @@ class Handler(BaseHTTPRequestHandler):
                     "position": str(body.get("position", "")).strip(),
                     "email": str(body.get("email", "")).strip(),
                     "note": str(body.get("note", "")).strip(),
+                    "tags": norm_tags(body.get("tags")),
                     "subject_override": str(body.get("subject_override", "")).strip(),
                     "body_override": str(body.get("body_override", "")),
                     "atts": [str(a) for a in (body.get("atts") or [])],
@@ -1002,6 +1182,8 @@ class Handler(BaseHTTPRequestHandler):
                             j["progress"] = v if v in ("未回音", "笔试", "面试", "Offer", "挂了", "我放弃") else "未回音"
                         if "atts" in body:
                             j["atts"] = [str(a) for a in (body.get("atts") or [])]
+                        if "tags" in body:
+                            j["tags"] = norm_tags(body.get("tags"))
                         break
                 save_jobs(jobs)
                 self._json({"ok": True})
@@ -1019,8 +1201,48 @@ class Handler(BaseHTTPRequestHandler):
                 save_jobs(jobs)
                 self._json({"ok": True})
             elif path == "/api/jobs/import":
-                result = excel_import(body.get("data", ""))
-                self._json({"ok": True, **result})
+                result = excel_import(body.get("data", ""), body.get("tags"))
+                self._json({"ok": True, **result, "all_tags": tag_all()})
+            elif path == "/api/jobs/tag":
+                # 批量打标签：mode=add 追加 / set 覆盖 / remove 摘掉
+                ids = {str(x) for x in (body.get("ids") or [])}
+                if not ids:
+                    self._json({"ok": False, "error": "先勾选要打标签的条目"})
+                    return
+                want = norm_tags(body.get("tags"))
+                mode = str(body.get("mode", "add"))
+                if mode in ("add", "remove") and not want:
+                    self._json({"ok": False, "error": "先写要打的标签（多个用逗号隔开）"})
+                    return
+                jobs = get_jobs()
+                hit = 0
+                for j in jobs:
+                    if j["id"] not in ids:
+                        continue
+                    cur = [t for t in (j.get("tags") or []) if t]
+                    if mode == "set":
+                        cur = list(want)
+                    elif mode == "remove":
+                        drop = set(want)
+                        cur = [t for t in cur if t not in drop]
+                    else:
+                        for t in want:
+                            if t not in cur:
+                                cur.append(t)
+                        cur = cur[:MAX_TAGS_PER_JOB]
+                    j["tags"] = cur
+                    hit += 1
+                save_jobs(jobs)
+                self._json({"ok": True, "count": hit, "all_tags": tag_all()})
+            elif path == "/api/sheet":
+                rows = sheet_save(body.get("rows"))
+                self._json({"ok": True, "rows": rows})
+            elif path == "/api/sheet/parse":
+                rows = parse_xlsx(body.get("data", ""))
+                self._json({"ok": True, "rows": rows})
+            elif path == "/api/sheet/import":
+                result = import_rows(body.get("rows") or [], body.get("tags"))
+                self._json({"ok": True, **result, "all_tags": tag_all()})
             elif path == "/api/attachments":
                 name = os.path.basename(str(body.get("name", "附件")))
                 data = base64.b64decode(body.get("data", ""))

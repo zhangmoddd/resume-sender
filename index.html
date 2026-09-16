@@ -200,6 +200,48 @@
   .recbox .re { flex: none; width: 210px; color: #6b7280; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .recbox .rs { flex: none; width: 78px; }
   .recbox .rx { flex: 1 1 auto; min-width: 0; color: #a32d2d; font-size: 12px; word-break: break-word; }
+
+  /* ---------- 标签 ---------- */
+  .tagchip { display: inline-block; background: #eeedfe; color: #534ab7; border-radius: 20px;
+             font-size: 11px; line-height: 1.7; padding: 1px 8px; margin: 1px 3px 1px 0;
+             white-space: nowrap; max-width: 130px; overflow: hidden; text-overflow: ellipsis;
+             vertical-align: middle; }
+  .tagchip.clickable { cursor: pointer; }
+  .tagchip.clickable:hover { background: #dcd8fb; }
+  .tagchip.on { background: #534ab7; color: #fff; }
+  .tagbox { max-width: 148px; }
+  .tagnone { border: none; background: none; color: #c0c4cc; cursor: pointer; font-size: 12px;
+             padding: 0 3px; font-family: inherit; }
+  .tagnone:hover { color: #185fa5; }
+  .tagbar { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+  .tagbar .tb-label { font-size: 12px; color: #9ca3af; }
+
+  /* ---------- 在线填表 ---------- */
+  .sheet-modal { width: 1220px; max-width: 96vw; height: 90vh; }
+  .sheet-modal .modal-body { display: flex; flex-direction: column; }
+  .sheet-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; flex: none; }
+  .sheet-bar .spacer { flex: 1; }
+  .sheet-wrap { flex: 1 1 auto; min-height: 200px; overflow: auto; border: 1px solid #e5e7eb; border-radius: 10px; background: #fff; }
+  .sheet-wrap table { border-collapse: separate; border-spacing: 0; table-layout: fixed; }
+  .sheet-wrap th, .sheet-wrap td { padding: 0; border-right: 1px solid #eef0f3; border-bottom: 1px solid #eef0f3;
+                                   font-size: 13px; text-align: left; background: #fff; vertical-align: middle; }
+  .sheet-wrap thead th { background: #f9fafb; color: #6b7280; font-weight: 500; font-size: 12px;
+                         text-align: center; position: sticky; top: 0; z-index: 2; padding: 5px 0; }
+  .sheet-wrap td.rowhead, .sheet-wrap th.rowhead { background: #f9fafb; color: #9ca3af; text-align: center;
+                                                   font-size: 11px; position: sticky; left: 0; z-index: 1; }
+  .sheet-wrap th.corner { left: 0; z-index: 3; }
+  .sg-cell { cursor: cell; }
+  .sg-cell.sel { background: #dceafa; }
+  .sg-cell.anchor { box-shadow: inset 0 0 0 2px #185fa5; }
+  .sg-input { display: block; width: 100%; border: none; background: transparent; padding: 6px 8px;
+              font-size: 13px; font-family: inherit; color: #2c2c2a; }
+  .sg-input:focus { outline: 2px solid #185fa5; outline-offset: -2px; background: #fff; position: relative; z-index: 4; }
+  .sheet-foot { flex: none; font-size: 12px; color: #6b7280; padding: 8px 2px 2px; }
+  .sheet-foot b { color: #185fa5; }
+  .sheet-foot .bad { color: #a32d2d; }
+  .tag-input { border: 1px solid #d1d5db; border-radius: 8px; padding: 7px 10px; font-size: 13px;
+               font-family: inherit; width: 230px; }
+  .tag-input:focus { outline: none; border-color: #185fa5; }
 </style>
 </head>
 <body>
@@ -223,7 +265,7 @@
     <div class="card">
       <div class="statbar" id="statBar"></div>
       <div class="filters">
-        <input type="text" id="fSearch" placeholder="🔍 搜公司 / 岗位 / 邮箱" oninput="renderJobs()">
+        <input type="text" id="fSearch" placeholder="🔍 搜公司 / 岗位 / 邮箱 / 标签" oninput="renderJobs()">
         <select id="fStatus" onchange="renderJobs()">
           <option value="">全部状态</option>
           <option>待发</option><option>发送中</option><option>已发送</option><option>失败</option>
@@ -232,6 +274,7 @@
           <option value="">全部进展</option>
           <option>未回音</option><option>笔试</option><option>面试</option><option>Offer</option><option>挂了</option><option>我放弃</option>
         </select>
+        <select id="fTag" onchange="renderJobs()"><option value="">全部标签</option></select>
         <input type="date" id="fDateFrom" onchange="renderJobs()" title="投递日期：从这天开始（含这天）">
         <span class="hint">到</span>
         <input type="date" id="fDateTo" onchange="renderJobs()" title="投递日期：到这天为止（含这天）">
@@ -240,26 +283,30 @@
       </div>
       <div class="toolbar">
         <button class="btn" onclick="openAdd()">＋ 添加投递目标</button>
+        <button class="btn" onclick="openSheet()">📝 在线填表</button>
         <button class="btn" onclick="pickImport()">📂 导入 Excel</button>
         <button class="btn" onclick="location.href='/api/jobs/template'">⬇ 下载清单模板</button>
+        <button class="btn" onclick="tagSelected()">🏷 打标签</button>
         <button class="btn" onclick="location.href='/api/jobs/export'">⬇ 导出投递记录</button>
         <button class="btn" onclick="resetFailed()">把失败/已发送重置为待发</button>
         <span class="spacer"></span>
         <button class="btn danger" onclick="deleteSelected()">删除选中</button>
       </div>
+      <div class="tagbar" id="tagBar" style="display:none;"></div>
       <div style="overflow:auto; max-height: 420px; border:1px solid #f0f1f3; border-radius:10px;">
         <table>
           <thead><tr>
             <th style="width:36px;"><input type="checkbox" id="checkAll" onchange="toggleAll(this)"></th>
-            <th style="width:140px;">公司</th>
-            <th style="width:120px;">岗位</th>
-            <th style="width:180px;">收件邮箱</th>
+            <th style="width:132px;">公司</th>
+            <th style="width:112px;">岗位</th>
+            <th style="width:164px;">收件邮箱</th>
             <th>备注</th>
-            <th style="width:110px;">我的进展</th>
-            <th style="width:90px;">定制</th>
-            <th style="width:80px;">状态</th>
-            <th style="width:130px;">发送时间</th>
-            <th style="width:100px;">操作</th>
+            <th style="width:132px;">标签</th>
+            <th style="width:104px;">我的进展</th>
+            <th style="width:76px;">定制</th>
+            <th style="width:78px;">状态</th>
+            <th style="width:116px;">发送时间</th>
+            <th style="width:92px;">操作</th>
           </tr></thead>
           <tbody id="jobRows"></tbody>
         </table>
@@ -476,10 +523,27 @@
       <div class="okbox">
         ✅ <b>日常投递（设置做完一次后，每家公司只要 30 秒）</b><br>
         <b>公司多 → 用 Excel：</b>「投递清单」点「⬇下载清单模板」→ 用 Excel 打开，一行填一家（公司 / 岗位 / 收件邮箱，备注可空）→ 保存 → 回软件点「📂导入 Excel」。<br>
+        <b>懒得开 Excel → 用「📝在线填表」：</b>直接在网页表格里填，Excel 里已有的整块粘进来也行；填完<b>框选</b>要导的那块再导（下面详说）。<br>
         <b>岗位怎么填：</b>招聘信息里写了岗位就照抄；只写了"需求专业"没写岗位的（比如群发校招），就填大类，如「2027届校园招聘」——别空着，邮件主题会用到它。<br>
         <b>公司少 → 手动加：</b>「投递清单」点「＋添加投递目标」，填公司、岗位、邮箱，保存。<br>
         <b>发送：</b>在清单里勾选要投的公司 → 点蓝色大按钮「开始投递」→ 确认。软件自动一封封发（默认 40 秒一封），下方有实时进度和日志，发完自动停。<br>
         <b>记录：</b>随时点「⬇导出投递记录」，下载 Excel 记着投了谁、什么时候投的。
+      </div>
+      <div class="okbox" style="background:#f4f8fd; border-color:#cfe3f7;">
+        📝 <b>在线填表：不想开 Excel 的懒人路线</b><br>
+        点「投递清单」左上角的「<b>📝 在线填表</b>」，会开一张网页表格。<br>
+        <b>① 填：</b>直接在格子里打字。<b>Excel 里已经填好的</b>，在 Excel 里选中那片 → 复制 → 回到这儿点一下起始格子 → <b>Ctrl+V</b> 整块粘进来。（也可以点「📂 打开 Excel 文件」，把它铺进表格。）<br>
+        <b>② 框：</b>用鼠标在表格上<b>拖一块区域</b> —— 只拖左边三列行不行？行。只拖第 10~15 行？也行。表格下方会实时显示「已框选 A10 : C15」和每列的含义。<br>
+        <b>③ 导：</b>点「✅ 导入选中区域」→ 弹出的确认框会把<b>列的对应关系</b>（第1列=公司…）和<b>前几行长什么样</b>列给你看 → 你点头才真正写进清单。
+        <b>不是自动导入。</b><br>
+        <span class="hint">列的顺序固定：第1列公司、第2列岗位、第3列收件邮箱、第4列备注。<b>框几列就认几列</b>，备注可以空着；框进来的表头行会自动跳过；重复的（公司+岗位+邮箱都一样）会自动跳过。表格内容会自动存在本机，关掉软件再打开还在 —— 导完记得点「清空表格」。</span>
+      </div>
+      <div class="okbox" style="background:#f7f5fd; border-color:#ddd6f5;">
+        🏷 <b>标签：公司一多，靠它分组</b><br>
+        <b>怎么打：</b>在「在线填表」右下角「这批打标签」里写一句（例如 <b>9/19晚投，国企</b>），这一批导进去的条目就全带上了；已经存在的条目，在清单左边勾选几条 → 点「<b>🏷 打标签</b>」→ 写标签，一次打一批。<br>
+        <b>怎么改：</b>清单里「标签」那一列，点「＋标签」给这一条加，已经有标签的点「✎」改。<br>
+        <b>怎么看：</b>点清单上方标签栏里的标签，或者用筛选区的「全部标签」，就只看这一批了；再点「✕ 取消」回到全部。<br>
+        <span class="hint">标签只有你自己看得到，<b>绝不会写进邮件</b>（要发给 HR 的内容写在「备注」里，模板里用 {备注} 引用）。</span>
       </div>
       <div class="okbox" style="background:#eeedfe; border-color:#cecbf6;">
         📦 <b>某家公司要求特殊怎么办？（比如：要发压缩包、主题要按它的格式写）</b><br>
@@ -534,6 +598,7 @@
     </div>
     <div class="field"><label>收件邮箱</label><input id="fEmail" placeholder="hr@company.com"></div>
     <div class="field"><label>备注（可选，可用变量 {备注} 引用）</label><input id="fNote" placeholder="例如：要求压缩包投递、命名格式等"></div>
+    <div class="field"><label>标签（可选，只给你自己看，不会发给 HR；多个用逗号隔开）</label><input id="fTags" placeholder="例如：9/19晚投，国企"></div>
     <div style="border-top:1px dashed #e5e7eb; margin:14px 0 10px; padding-top:12px;">
       <b style="font-size:13px; color:#0c447c;">我的求职进展（自己随时改，跟发送无关）</b>
       <div class="grid" style="grid-template-columns:1fr 1fr; gap:10px; margin-top:8px;">
@@ -603,6 +668,38 @@
       </div>
     </div>
     <div class="modal-body pv-body" id="pvBody"></div>
+  </div>
+</div>
+
+<!-- 在线填表：不用开 Excel，直接在网页里填 / 粘 / 框选导入 -->
+<div class="overlay" id="sheetOverlay">
+  <div class="modal sheet-modal">
+    <div class="modal-head">
+      <h3>在线填表 <span class="hint" style="font-weight:400;">不想开 Excel 就直接在这儿填；Excel 里已经有的，整块复制粘进来也行</span></h3>
+      <button class="modal-close" onclick="closeSheet()" title="关闭" aria-label="关闭">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="sheet-bar">
+        <span class="hint">列的顺序：<b style="color:#185fa5;">第1列 公司</b> · <b style="color:#185fa5;">第2列 岗位</b> · <b style="color:#185fa5;">第3列 收件邮箱</b> · <b style="color:#185fa5;">第4列 备注</b><span style="color:#c0c4cc;">（备注可空；第5列往后用不到）</span></span>
+        <span class="spacer"></span>
+        <input type="file" id="sheetFile" accept=".xlsx,.xls" style="display:none;">
+        <button class="btn" onclick="document.getElementById('sheetFile').click()">📂 打开 Excel 文件</button>
+        <button class="btn" onclick="sheetAddRows()">＋ 加 20 行</button>
+        <button class="btn danger" onclick="sheetClear()">清空表格</button>
+      </div>
+      <div class="sheet-wrap" id="sheetWrap"></div>
+      <div class="sheet-foot" id="sheetFoot"></div>
+    </div>
+    <div class="modal-foot" style="justify-content:space-between; align-items:center;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span class="hint" style="white-space:nowrap;">这批打标签</span>
+        <input class="tag-input" id="sheetTags" placeholder="例如：9/19晚投，国企（可留空）">
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn" onclick="closeSheet()">关闭</button>
+        <button class="btn primary" onclick="importSelection()">✅ 导入选中区域</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -719,6 +816,7 @@ function renderStat() {
 }
 function clearFilters() {
   $("#fSearch").value = ""; $("#fStatus").value = ""; $("#fProgress").value = "";
+  $("#fTag").value = "";
   $("#fDateFrom").value = ""; $("#fDateTo").value = "";
   renderJobs();
 }
@@ -786,12 +884,15 @@ function setProgress(id, val) {
 }
 function renderJobs() {
   const kw = ($("#fSearch").value || "").toLowerCase().trim();
-  const fs = $("#fStatus").value, fp = $("#fProgress").value;
+  const fs = $("#fStatus").value, fp = $("#fProgress").value, ft = $("#fTag").value;
   const dFrom = $("#fDateFrom").value, dTo = $("#fDateTo").value;
   const list = JOBS.filter(j => {
-    if (kw && !((j.company + j.position + j.email).toLowerCase().includes(kw))) return false;
+    const tg = (j.tags || []).join(" ");
+    if (kw && !((j.company + j.position + j.email + tg).toLowerCase().includes(kw))) return false;
     if (fs && j.status !== fs) return false;
     if (fp && j.progress !== fp) return false;
+    if (ft === "__has__") { if (!(j.tags || []).length) return false; }
+    else if (ft && !(j.tags || []).includes(ft)) return false;
     // 只管"发送时间"这一列：填了「从」就只看这天及以后投的，填了「到」就只看这天及以前投的
     const d = (j.sent_at || "").slice(0, 10);
     if (dFrom && !(d && d >= dFrom)) return false;
@@ -820,6 +921,7 @@ function renderJobs() {
       ${editCell(j, "position", "wrap")}
       ${editCell(j, "email", "")}
       ${editCell(j, "note", "wrap")}
+      <td class="tagbox">${tagCell(j)}</td>
       <td>${pgSel}</td>
       <td>${tags.length
         ? `<span class="custom-tag" style="cursor:pointer;" onclick="openAttList('${j.id}')" title="点一下看这家要发的附件">⚡ ${tags.join("·")}</span>`
@@ -835,10 +937,77 @@ function renderJobs() {
     </tr>`;
   }).join("");
   $("#jobEmpty").style.display = JOBS.length ? "none" : "block";
-  const active = kw || fs || fp || dFrom || dTo;
+  const active = kw || fs || fp || ft || dFrom || dTo;
   $("#filterCount").textContent = active ? `筛出 ${list.length} / 共 ${JOBS.length} 条` : "";
   updateSel();
   renderStat();
+  refreshTagUI();
+}
+/* ---------- 标签 ---------- */
+function allTags() {
+  const seen = [];
+  JOBS.forEach(j => (j.tags || []).forEach(t => { if (t && !seen.includes(t)) seen.push(t); }));
+  return seen;
+}
+function refreshTagUI() {
+  const tags = allTags(), cur = $("#fTag").value;
+  $("#fTag").innerHTML = `<option value="">全部标签</option>` +
+    tags.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join("") +
+    `<option value="__has__">只看有标签的</option>`;
+  $("#fTag").value = [...$("#fTag").options].some(o => o.value === cur) ? cur : "";
+
+  const bar = $("#tagBar"), now = $("#fTag").value;
+  bar.style.display = tags.length ? "flex" : "none";
+  if (!tags.length) return;
+  bar.innerHTML = `<span class="tb-label">标签：</span>` +
+    tags.map(t => `<span class="tagchip clickable${now === t ? " on" : ""}" data-tag="${esc(t)}" ` +
+                  `onclick="filterByTag(this.dataset.tag)" title="点一下只看带这个标签的">${esc(t)}</span>`).join("") +
+    (now ? `<button class="tagnone" onclick="filterByTag('')" title="取消标签筛选">✕ 取消</button>` : "");
+}
+function filterByTag(t) {
+  $("#fTag").value = (t && t === $("#fTag").value) ? "" : (t || "");
+  renderJobs();
+}
+function tagCell(j) {
+  const ts = j.tags || [];
+  return ts.map(t => `<span class="tagchip clickable" data-tag="${esc(t)}" ` +
+                     `onclick="filterByTag(this.dataset.tag)" title="点一下只看带这个标签的">${esc(t)}</span>`).join("") +
+    `<button class="tagnone" data-id="${j.id}" onclick="editTags(this.dataset.id)" ` +
+    `title="${ts.length ? "改这条的标签" : "给这条打标签"}">${ts.length ? "✎" : "＋标签"}</button>`;
+}
+async function editTags(id) {
+  const j = JOBS.find(x => x.id === id); if (!j) return;
+  const v = prompt(`给「${j.company || j.email}」打标签\n（多个标签用逗号隔开；清空 = 去掉这条的标签）`,
+                   (j.tags || []).join("，"));
+  if (v === null) return;
+  const r = await api("/api/jobs/tag", { ids: [id], tags: v, mode: "set" });
+  if (!r.ok) return toast(r.error, false);
+  await loadJobs();
+  toast("标签已保存");
+}
+async function tagSelected() {
+  const ids = selectedIds();
+  if (!ids.length) return toast("先在清单左边勾选要打标签的条目", false);
+  const v = prompt(`给选中的 ${ids.length} 条打标签\n（多个标签用逗号隔开，例如：9/19晚投，国企）`, "");
+  if (v === null || !v.trim()) return;
+  const r = await api("/api/jobs/tag", { ids, tags: v, mode: "add" });
+  if (!r.ok) return toast(r.error, false);
+  await loadJobs();
+  toast(`已给 ${r.count} 条打上标签`);
+}
+async function clearTagOne() {
+  const tags = allTags();
+  if (!tags.length) return;
+  const pick = prompt("要删掉哪个标签？\n（只把标签从清单条目上摘掉，条目本身不删；填标签名，或填前面的序号）\n\n" +
+                      tags.map((t, i) => `${i + 1}. ${t}`).join("\n"), "");
+  if (pick === null || !pick.trim()) return;
+  const target = tags.find(t => t === pick.trim()) || tags[Number(pick.trim()) - 1];
+  if (!target) return toast("没找到这个标签", false);
+  const r = await api("/api/jobs/tag", { ids: JOBS.map(j => j.id), tags: [target], mode: "remove" });
+  if (!r.ok) return toast(r.error, false);
+  if ($("#fTag").value === target) $("#fTag").value = "";
+  await loadJobs();
+  toast(`标签「${target}」已从清单里摘掉`);
 }
 function selectedIds() {
   return [...document.querySelectorAll("#jobRows tr")].filter(tr => tr.querySelector(".rowcheck").checked).map(tr => tr.dataset.id);
@@ -851,7 +1020,7 @@ function toggleAll(cb) {
 
 async function openAdd() {
   EDIT_ID = null; $("#editTitle").textContent = "添加投递目标";
-  ["fCompany","fPosition","fEmail","fNote","fSubject","fBody","fEventDate","fMyNote"].forEach(id => $("#"+id).value = "");
+  ["fCompany","fPosition","fEmail","fNote","fTags","fSubject","fBody","fEventDate","fMyNote"].forEach(id => $("#"+id).value = "");
   $("#fProgressSel").value = "未回音";
   renderEditAtts(null);
   $("#editOverlay").classList.add("show");
@@ -860,6 +1029,7 @@ function openEdit(id) {
   const j = JOBS.find(x => x.id === id); if (!j) return;
   EDIT_ID = id; $("#editTitle").textContent = "编辑投递目标";
   $("#fCompany").value = j.company; $("#fPosition").value = j.position; $("#fEmail").value = j.email; $("#fNote").value = j.note;
+  $("#fTags").value = (j.tags || []).join("，");
   $("#fSubject").value = j.subject_override || ""; $("#fBody").value = j.body_override || "";
   $("#fProgressSel").value = j.progress || "未回音"; $("#fEventDate").value = j.event_date || ""; $("#fMyNote").value = j.mynote || "";
   renderEditAtts(j);
@@ -890,6 +1060,7 @@ function closeEdit() { $("#editOverlay").classList.remove("show"); }
 async function saveEdit() {
   const data = {
     company: $("#fCompany").value, position: $("#fPosition").value, email: $("#fEmail").value, note: $("#fNote").value,
+    tags: $("#fTags").value,
     subject_override: $("#fSubject").value, body_override: $("#fBody").value,
     progress: $("#fProgressSel").value, event_date: $("#fEventDate").value, mynote: $("#fMyNote").value,
     atts: [...document.querySelectorAll(".fatt:checked")].map(c => c.value),
@@ -1250,9 +1421,269 @@ function startPolling() {
   }, 2500);
 }
 
+/* ---------- 在线填表 ---------- */
+const SHEET_COLS = 4;
+const SHEET_COL_CN = ["公司", "岗位", "收件邮箱", "备注"];
+const SHEET_COL_LETTER = ["A", "B", "C", "D"];
+let SHEET = [], SHEET_ROWS = 40, SEL = null, sheetDragging = false, saveTimer = null, lastSelKey = "";
+
+function blankSheet(n) { return Array.from({ length: n }, () => Array(SHEET_COLS).fill("")); }
+function colName(c) { return SHEET_COL_LETTER[c] || ("第" + (c + 1) + "列"); }
+
+async function openSheet() {
+  $("#sheetOverlay").classList.add("show");
+  let loaded = null;
+  try { loaded = await api("/api/sheet"); } catch (e) { loaded = null; }
+  const rows = (loaded && loaded.rows) || [];
+  SHEET_ROWS = Math.min(400, Math.max(40, rows.length + 10));
+  SHEET = blankSheet(SHEET_ROWS);
+  rows.forEach((line, r) => {
+    if (r >= SHEET_ROWS) return;
+    (line || []).forEach((v, c) => { if (c < SHEET_COLS) SHEET[r][c] = v == null ? "" : String(v); });
+  });
+  SEL = null; lastSelKey = "";
+  renderSheet();
+  if (rows.length && loaded && loaded.updated_at) {
+    toast("已载入上次没导完的内容（" + loaded.updated_at + " 存的）");
+  }
+}
+function closeSheet() {
+  $("#sheetOverlay").classList.remove("show");
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+  sheetSaveNow();
+}
+function queueSheetSave() {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(sheetSaveNow, 1200);
+}
+async function sheetSaveNow() {
+  saveTimer = null;
+  try { await api("/api/sheet", { rows: SHEET }); } catch (e) {}
+}
+function renderSheet() {
+  const W = [190, 190, 230, 240];
+  let html = `<table><thead><tr><th class="rowhead corner" style="width:42px;"></th>`;
+  for (let c = 0; c < SHEET_COLS; c++) {
+    html += `<th style="width:${W[c]}px;">${colName(c)} · ${SHEET_COL_CN[c]}</th>`;
+  }
+  html += `</tr></thead><tbody>`;
+  for (let r = 0; r < SHEET_ROWS; r++) {
+    html += `<tr><td class="rowhead">${r + 1}</td>`;
+    for (let c = 0; c < SHEET_COLS; c++) {
+      html += `<td class="sg-cell" data-r="${r}" data-c="${c}">` +
+              `<input class="sg-input" data-r="${r}" data-c="${c}" value="${esc(SHEET[r][c])}"` +
+              ` placeholder="${r === 0 && c === 0 ? "在这儿填，或从 Excel 整块粘" : ""}"></td>`;
+    }
+    html += `</tr>`;
+  }
+  html += `</tbody></table>`;
+  $("#sheetWrap").innerHTML = html;
+  paintSel(true);
+  updateSheetFoot();
+}
+function normSel() {
+  if (!SEL) return null;
+  return {
+    r1: Math.min(SEL.r1, SEL.r2), r2: Math.max(SEL.r1, SEL.r2),
+    c1: Math.min(SEL.c1, SEL.c2), c2: Math.max(SEL.c1, SEL.c2),
+  };
+}
+function paintSel(force) {
+  const s = normSel();
+  const key = s ? `${s.r1},${s.c1},${s.r2},${s.c2}` : "";
+  if (!force && key === lastSelKey) return;
+  lastSelKey = key;
+  document.querySelectorAll("#sheetWrap .sg-cell").forEach(td => td.classList.remove("sel", "anchor"));
+  if (!s) return;
+  for (let r = s.r1; r <= s.r2; r++) {
+    for (let c = s.c1; c <= s.c2; c++) {
+      const td = document.querySelector(`#sheetWrap .sg-cell[data-r="${r}"][data-c="${c}"]`);
+      if (td) td.classList.add("sel");
+    }
+  }
+  const a = document.querySelector(`#sheetWrap .sg-cell[data-r="${SEL.r1}"][data-c="${SEL.c1}"]`);
+  if (a) a.classList.add("anchor");
+}
+function updateSheetFoot() {
+  const el = $("#sheetFoot"), s = normSel();
+  if (!s) {
+    el.innerHTML = `还没框选。用鼠标在表格里<b>拖一块区域</b>（比如只拖左边三列），再点右下角「✅ 导入选中区域」。`;
+    return;
+  }
+  const rows = s.r2 - s.r1 + 1, cols = s.c2 - s.c1 + 1;
+  let filled = 0, hasAt = false;
+  for (let r = s.r1; r <= s.r2; r++) {
+    const seg = SHEET[r].slice(s.c1, s.c2 + 1);
+    if (seg.some(v => v && v.trim())) filled++;
+    if (seg.some(v => (v || "").includes("@"))) hasAt = true;
+  }
+  const map = [];
+  for (let c = s.c1; c <= s.c2; c++) map.push(`${colName(c)} 列 = ${SHEET_COL_CN[c]}`);
+  el.innerHTML = `已框选 <b>${colName(s.c1)}${s.r1 + 1} : ${colName(s.c2)}${s.r2 + 1}</b>` +
+    `（${cols} 列 × ${rows} 行，有内容的 ${filled} 行）　${map.join("　·　")}` +
+    (hasAt ? "" : `　<span class="bad">⚠ 这块里没看到邮箱（没有带 @ 的内容），把收件邮箱那一列也框进来</span>`);
+}
+function fillCells(r0, c0, data) {
+  let maxC = 0;
+  data.forEach(line => { maxC = Math.max(maxC, line.length); });
+  const need = r0 + data.length;
+  let grow = false;
+  if (need > SHEET_ROWS) {
+    SHEET_ROWS = Math.min(400, Math.max(need + 10, SHEET_ROWS + 20));
+    while (SHEET.length < SHEET_ROWS) SHEET.push(Array(SHEET_COLS).fill(""));
+    grow = true;
+  }
+  let dropped = false;
+  data.forEach((line, i) => {
+    const r = r0 + i;
+    if (r >= SHEET_ROWS) return;
+    line.forEach((v, j) => {
+      const c = c0 + j;
+      if (c >= SHEET_COLS) { dropped = true; return; }
+      SHEET[r][c] = v == null ? "" : String(v);
+    });
+  });
+  if (grow) renderSheet();
+  else {
+    data.forEach((line, i) => line.forEach((v, j) => {
+      const c = c0 + j;
+      if (c >= SHEET_COLS) return;
+      const el = document.querySelector(`.sg-input[data-r="${r0 + i}"][data-c="${c}"]`);
+      if (el) el.value = SHEET[r0 + i][c];
+    }));
+  }
+  queueSheetSave();
+  updateSheetFoot();
+  return { rows: data.length, dropped };
+}
+function sheetAddRows() {
+  if (SHEET_ROWS >= 400) return toast("最多 400 行，够用了", false);
+  SHEET_ROWS = Math.min(400, SHEET_ROWS + 20);
+  while (SHEET.length < SHEET_ROWS) SHEET.push(Array(SHEET_COLS).fill(""));
+  renderSheet();
+}
+function sheetClear() {
+  if (!confirm("清空表格里的内容？（已经导入到清单的不受影响）")) return;
+  SHEET = blankSheet(SHEET_ROWS);
+  SEL = null;
+  renderSheet();
+  sheetSaveNow();
+  toast("表格已清空");
+}
+async function importSelection() {
+  const s = normSel();
+  if (!s) return toast("先在表格里用鼠标拖一块区域（确定要导入哪几列哪几行）", false);
+  const rows = [];
+  let hasAt = false, filled = 0;
+  for (let r = s.r1; r <= s.r2; r++) {
+    const line = Array(SHEET_COLS).fill("");
+    for (let c = s.c1; c <= s.c2; c++) {
+      line[c] = SHEET[r][c] || "";
+      if ((SHEET[r][c] || "").includes("@")) hasAt = true;
+    }
+    if (line.some(v => v && v.trim())) filled++;
+    rows.push(line);
+  }
+  if (!filled) return toast("这块区域是空的，先填点内容", false);
+  if (!hasAt) return toast("这块区域里没有邮箱地址，把收件邮箱那一列也框进来再导", false);
+
+  const map = [];
+  for (let c = s.c1; c <= s.c2; c++) map.push(`  第${c - s.c1 + 1}列（${colName(c)}）= ${SHEET_COL_CN[c]}`);
+  const show = [];
+  for (let i = 0, n = 0; i < rows.length && n < 3; i++) {
+    if (!rows[i].some(v => v && v.trim())) continue;
+    show.push(`  ${n + 1}. ` + rows[i].slice(s.c1, s.c2 + 1).map(v => (v || "").trim() || "（空）").join("  |  "));
+    n++;
+  }
+  const tags = $("#sheetTags").value.trim();
+  const msg = `即将导入：${colName(s.c1)}${s.r1 + 1} : ${colName(s.c2)}${s.r2 + 1}` +
+    `（${s.c2 - s.c1 + 1} 列 × ${s.r2 - s.r1 + 1} 行，有内容的 ${filled} 行）\n\n` +
+    `列的对应关系：\n${map.join("\n")}\n\n前几行长这样：\n${show.join("\n")}\n\n` +
+    (tags ? `这批会打上标签：${tags}\n\n` : "") +
+    `确认导入吗？（重复的会自动跳过，表头行会自动忽略）`;
+  if (!confirm(msg)) return;
+
+  const r = await api("/api/sheet/import", { rows, tags });
+  if (!r.ok) return toast(r.error, false);
+  let m = `导入完成：新增 ${r.added} 条`;
+  if (r.skipped) m += `，跳过重复 ${r.skipped} 条`;
+  if (r.invalid) m += `，${r.invalid} 条没邮箱被丢掉`;
+  toast(m);
+  if (r.added) $("#sheetTags").value = "";
+  await loadJobs();
+}
+
+/* 在线填表上的鼠标 / 键盘 / 粘贴 */
+$("#sheetWrap").addEventListener("mousedown", e => {
+  const td = e.target.closest("td.sg-cell");
+  if (!td) return;
+  e.preventDefault();                       // 别让浏览器去选文字，我们自己框区域
+  sheetDragging = true;
+  const r = Number(td.dataset.r), c = Number(td.dataset.c);
+  SEL = { r1: r, c1: c, r2: r, c2: c };
+  paintSel(true);
+  updateSheetFoot();
+});
+document.addEventListener("mousemove", e => {
+  if (!sheetDragging) return;
+  const el = document.elementFromPoint(e.clientX, e.clientY);
+  const td = el && el.closest ? el.closest("td.sg-cell") : null;
+  if (!td) return;
+  SEL.r2 = Number(td.dataset.r); SEL.c2 = Number(td.dataset.c);
+  paintSel();
+  updateSheetFoot();
+});
+document.addEventListener("mouseup", () => {
+  if (!sheetDragging) return;
+  sheetDragging = false;
+  if (SEL && SEL.r1 === SEL.r2 && SEL.c1 === SEL.c2) {
+    const inp = document.querySelector(`.sg-input[data-r="${SEL.r1}"][data-c="${SEL.c1}"]`);
+    if (inp) { inp.focus(); inp.select(); }
+  }
+});
+$("#sheetWrap").addEventListener("input", e => {
+  const inp = e.target.closest("input.sg-input");
+  if (!inp) return;
+  SHEET[Number(inp.dataset.r)][Number(inp.dataset.c)] = inp.value;
+  updateSheetFoot();
+  queueSheetSave();
+});
+$("#sheetWrap").addEventListener("paste", e => {
+  const inp = e.target.closest("input.sg-input");
+  if (!inp) return;
+  const text = (e.clipboardData || window.clipboardData || {}).getData("text/plain") || "";
+  if (text.indexOf("\t") < 0 && text.indexOf("\n") < 0) return;   // 单个值，交给浏览器默认粘贴
+  e.preventDefault();
+  const lines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  if (lines.length && lines[lines.length - 1] === "") lines.pop();
+  const res = fillCells(Number(inp.dataset.r), Number(inp.dataset.c), lines.map(l => l.split("\t")));
+  toast(res.dropped ? `已粘进 ${res.rows} 行（超出的列丢掉了，只认前 4 列）`
+                    : `已粘进 ${res.rows} 行，框选要导的部分再点导入`);
+});
+$("#sheetFile").onchange = async e => {
+  const f = e.target.files[0];
+  e.target.value = "";
+  if (!f) return;
+  if (SHEET.some(row => row.some(v => v && String(v).trim())) &&
+      !confirm("表格里已经有内容了，用这个 Excel 文件的内容覆盖掉？")) return;
+  const b64 = await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result.split(",")[1]); fr.readAsDataURL(f); });
+  const r = await api("/api/sheet/parse", { data: b64 });
+  if (!r.ok) return toast(r.error, false);
+  const data = (r.rows || []).map(line => line.slice(0, SHEET_COLS));
+  while (data.length && !data[data.length - 1].some(v => v && String(v).trim())) data.pop();
+  if (!data.length) return toast("这个文件里没读到内容", false);
+  SHEET_ROWS = Math.min(400, Math.max(40, data.length + 10));
+  SHEET = blankSheet(SHEET_ROWS);
+  const res = fillCells(0, 0, data);
+  renderSheet();
+  sheetSaveNow();
+  toast(`已把 Excel 的 ${res.rows} 行铺进表格${res.dropped ? "（只取了前 4 列）" : ""}，检查/改完再框选导入`);
+};
+
 /* ---------- init ---------- */
 document.addEventListener("keydown", e => {
   if (e.key !== "Escape") return;
+  if ($("#sheetOverlay").classList.contains("show")) return closeSheet();
   if ($("#pvOverlay").classList.contains("show")) return closePreview();
   if ($("#attListOverlay").classList.contains("show")) return closeAttList();
   if ($("#histOverlay").classList.contains("show")) return closeHist();

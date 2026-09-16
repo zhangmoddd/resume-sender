@@ -861,6 +861,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._file(INDEX_HTML)
             elif path == "/api/attachments/view":
                 self._preview((qs.get("src") or ["att"])[0], (qs.get("name") or [""])[0])
+            elif path == "/api/logs":
+                # 投递记录页：全量发送记录，最新的排最前
+                logs = load_json("sent_log.json", [])
+                if not isinstance(logs, list):
+                    logs = []
+                self._json({"ok": True, "logs": list(reversed(logs))})
             elif path == "/api/jobs/history":
                 jid = (qs.get("id") or [""])[0]
                 logs = [e for e in load_json("sent_log.json", []) if e.get("id") == jid]

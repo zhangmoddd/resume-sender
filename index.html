@@ -154,8 +154,10 @@
   td.editable { cursor: text; }
   td.editable:hover { background: #f4f8fd; box-shadow: inset 0 0 0 1px #cfe3f7; }
   td.editable .cell-hint { color: #d1d5db; }
-  td.editing { background: #fff !important; box-shadow: inset 0 0 0 1px #185fa5 !important; padding: 5px 6px !important; }
-  .cell-input { width: 100%; border: 1px solid #185fa5; border-radius: 6px; padding: 4px 7px; font-size: 13px; font-family: inherit; background: #fff; }
+  /* 编辑时把「最多 260px」的限宽放开，输入框才会跟着你打的字一起变长 */
+  td.editing { background: #fff !important; box-shadow: inset 0 0 0 1px #185fa5 !important; padding: 5px 6px !important; max-width: none !important; }
+  /* 宽度交给 JS 按字数算（见 startInline），所以这里不能写死 100% */
+  .cell-input { width: auto; border: 1px solid #185fa5; border-radius: 6px; padding: 4px 7px; font-size: 13px; font-family: inherit; background: #fff; }
   .cell-input:focus { outline: none; }
   /* 附件预览弹窗 */
   .pv-modal { width: 1080px; max-width: 95vw; height: 88vh; }
@@ -174,6 +176,30 @@
   .hist .hrow:last-child { border-bottom: none; }
   .hist .hok { color: #3b6d11; }
   .hist .herr { color: #a32d2d; }
+  /* 徽章 / 标签不许被挤成两行 */
+  .badge, .custom-tag, .pg-select { white-space: nowrap; }
+  /* 多行输入框：右下角那个小三角 = 按住能往下拖、把框拉大。
+     浏览器原生的太小，这里叠一个更明显的蓝色角标提示用户去拖它。 */
+  textarea {
+    resize: vertical;
+    background-image: url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Cg fill='none' stroke='%23185fa5' stroke-width='2.2' stroke-linecap='round'%3E%3Cpath d='M18 6 L6 18'/%3E%3Cpath d='M18 13 L13 18'/%3E%3C/g%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 1px bottom 1px;
+    background-size: 20px 20px;
+  }
+  /* 投递记录页 */
+  .recstat { display: flex; gap: 18px; flex-wrap: wrap; font-size: 13px; color: #374151; margin-bottom: 12px; }
+  .recstat b { color: #185fa5; }
+  .recstat .g { color: #3b6d11; font-weight: 600; }
+  .recstat .r { color: #a32d2d; font-weight: 600; }
+  .recbox { max-height: 560px; overflow: auto; border: 1px solid #f0f1f3; border-radius: 10px; }
+  .recbox .rrow { display: flex; gap: 12px; padding: 10px 14px; border-bottom: 1px dashed #f0f1f3; font-size: 13px; align-items: baseline; }
+  .recbox .rrow:last-child { border-bottom: none; }
+  .recbox .rt { flex: none; width: 158px; color: #374151; font-variant-numeric: tabular-nums; }
+  .recbox .rc { flex: none; width: 200px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .recbox .re { flex: none; width: 210px; color: #6b7280; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .recbox .rs { flex: none; width: 78px; }
+  .recbox .rx { flex: 1 1 auto; min-width: 0; color: #a32d2d; font-size: 12px; word-break: break-word; }
 </style>
 </head>
 <body>
@@ -184,6 +210,7 @@
 
 <nav id="nav">
   <button data-tab="jobs" class="active">投递清单</button>
+  <button data-tab="logs">投递记录</button>
   <button data-tab="tpl">邮件模板</button>
   <button data-tab="cfg">发送设置</button>
   <button data-tab="merge">材料合并</button>
@@ -254,6 +281,35 @@
     </div>
   </section>
 
+  <!-- ============ 投递记录 ============ -->
+  <section id="tab-logs" class="tabpane">
+    <div class="card">
+      <h2>投递记录（每发一封就留一条）</h2>
+      <div class="hint" style="margin-bottom:12px;">
+        按时间倒序排，最新的在最上面。发了什么、发给谁、成没成、没成是什么原因，都在这儿。
+      </div>
+      <div class="recstat" id="recStat"></div>
+      <div class="filters">
+        <input type="text" id="logSearch" placeholder="🔍 搜公司 / 收件邮箱" oninput="renderLogs()">
+        <select id="logResult" onchange="renderLogs()">
+          <option value="">全部结果</option>
+          <option value="ok">只看成功</option>
+          <option value="fail">只看失败</option>
+        </select>
+        <input type="date" id="logFrom" onchange="renderLogs()" title="从这天开始（含这天）">
+        <span class="hint">到</span>
+        <input type="date" id="logTo" onchange="renderLogs()" title="到这天为止（含这天）">
+        <button class="btn" onclick="clearLogFilters()">清空筛选</button>
+        <span class="spacer"></span>
+        <button class="btn" onclick="loadLogs()">↻ 刷新</button>
+      </div>
+      <div class="recbox" id="recBox"></div>
+      <div class="hint" style="margin-top:12px;">
+        记录存在软件目录的 <b>data/sent_log.json</b> 里，只在你本机，不上传任何地方。
+      </div>
+    </div>
+  </section>
+
   <!-- ============ 邮件模板 ============ -->
   <section id="tab-tpl" class="tabpane">
     <div class="grid">
@@ -267,6 +323,7 @@
           <label>邮件正文</label>
           <textarea id="tplBody" placeholder="尊敬的HR：&#10;&#10;您好！我是{学校}{姓名}，…"></textarea>
         </div>
+        <div class="hint" style="margin:-4px 0 10px;">💡 框右下角那个小三角是「拖动柄」：按住它往下拉，框就变高了，写长正文更舒服。拉多了也能再拉回去。</div>
         <div class="hint">可用的变量（点一下插入到光标处，发送时自动替换为每家公司的真实内容）：</div>
         <div class="chips">
           <span class="chip" onclick="insertVar('{公司}')">{公司}</span>
@@ -487,7 +544,11 @@
         </div>
         <div class="field"><label>重要日期（笔试/面试那天）</label><input type="date" id="fEventDate"></div>
       </div>
-      <div class="field"><label>我的笔记（HR 说了什么、面试反馈、想记的都写这）</label><textarea id="fMyNote" style="height:80px; resize:vertical;" placeholder="例如：HR 说两周内给结果；面试官让准备项目介绍"></textarea></div>
+      <div class="field">
+        <label>我的笔记（HR 说了什么、面试反馈、想记的都写这）</label>
+        <textarea id="fMyNote" style="height:80px;" placeholder="例如：HR 说两周内给结果；面试官让准备项目介绍"></textarea>
+        <div class="hint" style="margin-top:4px;">💡 框右下角的小三角是拖动柄：按住往下拉能把框拉高（这个弹窗里所有能拖的框都一样）。</div>
+      </div>
     </div>
     <div style="border-top:1px dashed #e5e7eb; margin:14px 0 10px; padding-top:12px;">
       <b style="font-size:13px; color:#0c447c;">这封邮件单独定制（可选）</b>
@@ -585,7 +646,48 @@ document.querySelectorAll("#nav button").forEach(b => b.onclick = () => {
   b.classList.add("active");
   $("#tab-" + b.dataset.tab).classList.add("active");
   if (b.dataset.tab === "jobs") loadJobs();
+  if (b.dataset.tab === "logs") loadLogs();
 });
+
+/* ---------- 投递记录（独立一页） ---------- */
+let LOGS = [];
+async function loadLogs() {
+  const r = await api("/api/logs");
+  LOGS = r.logs || [];
+  renderLogs();
+}
+function clearLogFilters() {
+  $("#logSearch").value = ""; $("#logResult").value = "";
+  $("#logFrom").value = ""; $("#logTo").value = "";
+  renderLogs();
+}
+function renderLogs() {
+  const kw = ($("#logSearch").value || "").toLowerCase().trim();
+  const res = $("#logResult").value;
+  const from = $("#logFrom").value, to = $("#logTo").value;
+  const list = LOGS.filter(e => {
+    if (kw && !((e.company || "") + (e.email || "")).toLowerCase().includes(kw)) return false;
+    if (res === "ok" && !e.ok) return false;
+    if (res === "fail" && e.ok) return false;
+    const d = (e.sent_at || "").slice(0, 10);
+    if (from && !(d && d >= from)) return false;
+    if (to && !(d && d <= to)) return false;
+    return true;
+  });
+  const okAll = LOGS.filter(e => e.ok).length;
+  $("#recStat").innerHTML =
+    `一共投了 <b>${LOGS.length}</b> 封 ｜ 成功 <span class="g">${okAll}</span> 封 ｜ 失败 <span class="r">${LOGS.length - okAll}</span> 封` +
+    (list.length !== LOGS.length ? ` ｜ 当前筛出 <b>${list.length}</b> 条` : "");
+  $("#recBox").innerHTML = list.length ? list.map(e => `
+    <div class="rrow">
+      <div class="rt">${esc(e.sent_at || "")}</div>
+      <div class="rc" title="${esc(e.company || "")}">${esc(e.company || "—")}</div>
+      <div class="re" title="${esc(e.email || "")}">${esc(e.email || "")}</div>
+      <div class="rs" style="color:${e.ok ? "#3b6d11" : "#a32d2d"};">${e.ok ? "✅ 成功" : "❌ 失败"}</div>
+      <div class="rx">${esc(e.error || "")}</div>
+    </div>`).join("")
+    : `<div class="empty">${LOGS.length ? "没有符合筛选条件的记录" : "还没有投递记录 —— 投一次就会出现在这里"}</div>`;
+}
 
 /* ---------- jobs ---------- */
 async function loadJobs() {
@@ -622,6 +724,12 @@ function clearFilters() {
 }
 /* ---------- 表格里直接改：点一下变输入框，回车/点别处保存，Esc 放弃 ---------- */
 const FIELD_CN = { company: "公司", position: "岗位", email: "收件邮箱", note: "备注" };
+// 估算一段字占几个"字符宽"：汉字/全角算 2，其它算 1
+function charWidth(s) {
+  let n = 0;
+  for (const ch of String(s || "")) n += ch.charCodeAt(0) > 255 ? 2 : 1;
+  return n;
+}
 function editCell(j, field, cls) {
   const v = j[field] || "";
   const body = v ? (field === "company" ? `<b>${esc(v)}</b>` : esc(v))
@@ -638,6 +746,10 @@ function startInline(td) {
   input.value = old;
   if (field === "email") input.placeholder = "hr@company.com";
   input.onclick = e => e.stopPropagation();
+  // 宽度跟着你打的字走：边打边变长，能看到全文（上限 64 个字符宽，再长也不会撑爆表格）
+  const fit = () => { input.size = Math.min(64, Math.max(8, charWidth(input.value) + 1)); };
+  fit();
+  input.oninput = fit;
   let closed = false;
   const finish = save => {
     if (closed) return;
@@ -1132,7 +1244,8 @@ function startPolling() {
       $("#logBox").innerHTML = s.log.map(l => `<div class="log-${l.level}">[${l.time}] ${esc(l.text)}</div>`).join("");
       $("#logBox").scrollTop = 1e9;
       loadJobs();
-      toast("本轮投递已结束，可导出记录查看");
+      if ($("#tab-logs").classList.contains("active")) loadLogs();
+      toast("本轮投递已结束，可到「投递记录」看详情");
     }
   }, 2500);
 }

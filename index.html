@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>简历批量投递助手</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Microsoft YaHei", system-ui, sans-serif; background: #f2f4f7; color: #2c2c2a; font-size: 14px; }
+  header { background: #fff; border-bottom: 1px solid #e5e7eb; padding: 14px 28px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 10; }
+  header h1 { font-size: 17px; font-weight: 600; color: #0c447c; }
+  header .quota { font-size: 13px; color: #6b7280; }
+  header .quota b { color: #185fa5; }
+  nav { display: flex; gap: 4px; padding: 10px 28px 0; }
+  nav button { border: none; background: transparent; padding: 10px 18px; font-size: 14px; color: #6b7280; cursor: pointer; border-radius: 10px 10px 0 0; }
+  nav button.active { background: #fff; color: #0c447c; font-weight: 600; box-shadow: 0 -2px 0 #185fa5 inset; }
+  main { padding: 18px 28px 60px; max-width: 1180px; margin: 0 auto; }
+  .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 18px; margin-bottom: 16px; }
+  .card h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; color: #1f2937; }
+  .hint { font-size: 12px; color: #9ca3af; line-height: 1.7; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid #d1d5db; background: #fff; color: #374151; border-radius: 8px; padding: 7px 14px; font-size: 13px; cursor: pointer; }
+  .btn:hover { border-color: #185fa5; color: #185fa5; }
+  .btn.primary { background: #185fa5; border-color: #185fa5; color: #fff; }
+  .btn.primary:hover { background: #0c447c; }
+  .btn.danger { color: #a32d2d; }
+  .btn.danger:hover { border-color: #a32d2d; }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn.big { padding: 11px 26px; font-size: 15px; border-radius: 10px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid #f0f1f3; font-size: 13px; vertical-align: top; }
+  th { color: #6b7280; font-weight: 500; font-size: 12px; background: #f9fafb; position: sticky; top: 0; }
+  td.wrap { max-width: 260px; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 12px; }
+  .st-待发 { background: #f1efe8; color: #5f5e5a; }
+  .st-发送中 { background: #faeeda; color: #854f0b; }
+  .st-已发送 { background: #eaf3de; color: #3b6d11; }
+  .st-失败 { background: #fcebeb; color: #a32d2d; }
+  .row-actions button { background: none; border: none; color: #185fa5; cursor: pointer; font-size: 12px; padding: 2px 6px; }
+  .row-actions button.del { color: #a32d2d; }
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; align-items: center; }
+  .toolbar .spacer { flex: 1; }
+  .err-text { color: #a32d2d; font-size: 12px; }
+  .progress-wrap { display: none; margin-top: 14px; border-top: 1px dashed #e5e7eb; padding-top: 14px; }
+  .progress-wrap.show { display: block; }
+  .bar { height: 10px; background: #eceef1; border-radius: 6px; overflow: hidden; }
+  .bar > div { height: 100%; background: #185fa5; width: 0; transition: width .4s; }
+  .bar-text { display: flex; justify-content: space-between; font-size: 12px; color: #6b7280; margin: 6px 0 10px; }
+  .logbox { background: #0e1726; color: #cbd5e1; font-family: Consolas, monospace; font-size: 12px; border-radius: 10px; padding: 12px; height: 180px; overflow-y: auto; line-height: 1.9; }
+  .log-ok { color: #6ee7a0; } .log-err { color: #f58e8e; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 13px; color: #374151; margin-bottom: 5px; }
+  .field input, .field textarea, .field select { width: 100%; border: 1px solid #d1d5db; border-radius: 8px; padding: 8px 10px; font-size: 13px; font-family: inherit; }
+  .field input:focus, .field textarea:focus { outline: none; border-color: #185fa5; }
+  .field textarea { height: 300px; resize: vertical; line-height: 1.7; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
+  .chip { background: #e6f1fb; color: #185fa5; border-radius: 6px; padding: 3px 9px; font-size: 12px; cursor: pointer; user-select: none; }
+  .chip:hover { background: #cfe3f7; }
+  .preview { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px; font-size: 13px; line-height: 1.8; white-space: pre-wrap; word-break: break-all; }
+  .mail { border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden; }
+  .mail .mh { background: #f9fafb; padding: 10px 14px; border-bottom: 1px solid #e5e7eb; font-size: 13px; }
+  .mail .mh div { padding: 2px 0; }
+  .mail .mh b { color: #374151; font-weight: 500; display: inline-block; width: 58px; }
+  .mail .mb { padding: 14px; font-size: 13px; line-height: 1.9; white-space: pre-wrap; word-break: break-word; max-height: 380px; overflow-y: auto; background: #fff; }
+  .mail .matts { padding: 8px 14px; background: #f9fafb; border-top: 1px dashed #e5e7eb; font-size: 12px; color: #374151; }
+  .mail .matts .fa { color: #9ca3af; }
+  .custom-tag { display: inline-block; background: #eeedfe; color: #534ab7; border-radius: 4px; font-size: 11px; padding: 1px 6px; margin-right: 4px; }
+  .att-check { border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 10px; max-height: 150px; overflow-y: auto; }
+  .att-check label { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; cursor: pointer; }
+  .att-check .sz { color: #9ca3af; font-size: 12px; margin-left: auto; }
+  /* 进展徽章与统计 */
+  .pg-select { border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; padding: 2px 4px; background: #fff; max-width: 92px; }
+  .pg-select.pg-笔试 { background:#faeeda; color:#854f0b; border-color:#f0d9b5; }
+  .pg-select.pg-面试 { background:#e6f1fb; color:#0c447c; border-color:#c3ddf5; }
+  .pg-select.pg-Offer { background:#eaf3de; color:#3b6d11; border-color:#d3e7b8; }
+  .pg-select.pg-挂了 { background:#d3d1c7; color:#444441; }
+  .pg-select.pg-我放弃 { background:#fcebeb; color:#a32d2d; border-color:#f7c1c1; }
+  .pg-select.pg-未回音 { background:#f1efe8; color:#5f5e5a; }
+  .statbar { display: flex; gap: 16px; font-size: 13px; color: #374151; margin-bottom: 12px; flex-wrap: wrap; }
+  .statbar b { color: #185fa5; }
+  .statbar .off b { color: #3b6d11; }
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; align-items: center; }
+  .filters input, .filters select { border: 1px solid #d1d5db; border-radius: 8px; padding: 6px 10px; font-size: 13px; font-family: inherit; }
+  .filters input[type=text] { width: 210px; }
+  tr.soon td { background: #fff8e6 !important; }
+  tr.soon td:first-child { box-shadow: inset 3px 0 0 #ba7517; }
+  .evdate { font-size: 11px; color: #854f0b; margin-top: 2px; }
+  .evdate.past { color: #9ca3af; }
+  .preview .psub { font-weight: 600; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px dashed #e5e7eb; }
+  .att-item { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px dashed #f0f1f3; font-size: 13px; }
+  .att-item .size { color: #9ca3af; font-size: 12px; }
+  .att-item button { margin-left: auto; }
+  /* 教程 */
+  .steps { counter-reset: step; }
+  .step { display: flex; gap: 14px; padding: 12px 0; border-bottom: 1px dashed #f0f1f3; }
+  .step .num { flex: none; width: 26px; height: 26px; border-radius: 50%; background: #185fa5; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 13px; }
+  .step p { line-height: 1.8; font-size: 13.5px; }
+  .step b { color: #0c447c; }
+  .warnbox { background: #faeeda; border: 1px solid #f0d9b5; border-radius: 10px; padding: 12px 14px; font-size: 13px; line-height: 1.9; margin-top: 14px; }
+  .okbox { background: #eaf3de; border: 1px solid #d3e7b8; border-radius: 10px; padding: 12px 14px; font-size: 13px; line-height: 1.9; margin-top: 14px; }
+  /* 弹窗 */
+  .overlay { display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, .45); z-index: 50; align-items: center; justify-content: center; }
+  .overlay.show { display: flex; }
+  .modal { background: #fff; border-radius: 14px; padding: 22px; width: 460px; max-width: 92vw; }
+  .modal h3 { font-size: 15px; margin-bottom: 14px; }
+  .modal-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  #toast { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); background: #1f2937; color: #fff; padding: 10px 20px; border-radius: 10px; font-size: 13px; display: none; z-index: 99; }
+  .tabpane { display: none; } .tabpane.active { display: block; }
+  .empty { text-align: center; color: #9ca3af; padding: 40px 0; font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>简历批量投递助手</h1>
+  <div class="quota">今日已发 <b id="qToday">0</b> / 上限 <b id="qLimit">50</b> 封 <span id="qState" style="margin-left:10px;"></span></div>
+</header>
+
+<nav id="nav">
+  <button data-tab="jobs" class="active">投递清单</button>
+  <button data-tab="tpl">邮件模板</button>
+  <button data-tab="cfg">发送设置</button>
+  <button data-tab="help">使用教程</button>
+</nav>
+
+<main>
+  <!-- ============ 投递清单 ============ -->
+  <section id="tab-jobs" class="tabpane active">
+    <div class="card">
+      <div class="statbar" id="statBar"></div>
+      <div class="filters">
+        <input type="text" id="fSearch" placeholder="🔍 搜公司 / 岗位 / 邮箱" oninput="renderJobs()">
+        <select id="fStatus" onchange="renderJobs()">
+          <option value="">全部状态</option>
+          <option>待发</option><option>发送中</option><option>已发送</option><option>失败</option>
+        </select>
+        <select id="fProgress" onchange="renderJobs()">
+          <option value="">全部进展</option>
+          <option>未回音</option><option>笔试</option><option>面试</option><option>Offer</option><option>挂了</option><option>我放弃</option>
+        </select>
+        <input type="date" id="fDate" onchange="renderJobs()" title="只看这一天投递的">
+        <button class="btn" onclick="clearFilters()">清空筛选</button>
+        <span class="hint" id="filterCount"></span>
+      </div>
+      <div class="toolbar">
+        <button class="btn" onclick="openAdd()">＋ 添加投递目标</button>
+        <button class="btn" onclick="pickImport()">📂 导入 Excel</button>
+        <button class="btn" onclick="location.href='/api/jobs/template'">⬇ 下载清单模板</button>
+        <button class="btn" onclick="location.href='/api/jobs/export'">⬇ 导出投递记录</button>
+        <button class="btn" onclick="resetFailed()">把失败/已发送重置为待发</button>
+        <span class="spacer"></span>
+        <button class="btn danger" onclick="deleteSelected()">删除选中</button>
+      </div>
+      <div style="overflow:auto; max-height: 420px; border:1px solid #f0f1f3; border-radius:10px;">
+        <table>
+          <thead><tr>
+            <th style="width:36px;"><input type="checkbox" id="checkAll" onchange="toggleAll(this)"></th>
+            <th style="width:140px;">公司</th>
+            <th style="width:120px;">岗位</th>
+            <th style="width:180px;">收件邮箱</th>
+            <th>备注</th>
+            <th style="width:110px;">我的进展</th>
+            <th style="width:90px;">定制</th>
+            <th style="width:80px;">状态</th>
+            <th style="width:130px;">发送时间</th>
+            <th style="width:100px;">操作</th>
+          </tr></thead>
+          <tbody id="jobRows"></tbody>
+        </table>
+        <div id="jobEmpty" class="empty" style="display:none;">还没有投递目标：点「添加投递目标」手动加，或用 Excel 批量导入</div>
+      </div>
+      <div style="display:flex; align-items:center; gap:14px; margin-top:16px;">
+        <button class="btn primary big" id="startBtn" onclick="startSend()">🚀 开始投递选中项（<span id="selCount">0</span>）</button>
+        <span class="hint">已发送的不会重复投递；失败的可重置后再发</span>
+      </div>
+      <div class="progress-wrap" id="progWrap">
+        <div class="bar-text"><span id="progCurrent">准备中…</span><span id="progNum">0/0</span></div>
+        <div class="bar"><div id="progBar"></div></div>
+        <div style="display:flex; gap:10px; margin:10px 0;">
+          <button class="btn danger" onclick="stopSend()">■ 停止发送</button>
+          <span class="hint" style="align-self:center;">发送过程中请勿关闭本页和黑色运行窗口</span>
+        </div>
+        <div class="logbox" id="logBox"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 邮件模板 ============ -->
+  <section id="tab-tpl" class="tabpane">
+    <div class="grid">
+      <div class="card">
+        <h2>邮件主题与正文（写一次，全部自动替换）</h2>
+        <div class="field">
+          <label>邮件主题</label>
+          <input id="tplSubject" placeholder="例如：应聘【{岗位}】- {姓名}（{学校}）">
+        </div>
+        <div class="field">
+          <label>邮件正文</label>
+          <textarea id="tplBody" placeholder="尊敬的HR：&#10;&#10;您好！我是{学校}{姓名}，…"></textarea>
+        </div>
+        <div class="hint">可用的变量（点一下插入到光标处，发送时自动替换为每家公司的真实内容）：</div>
+        <div class="chips">
+          <span class="chip" onclick="insertVar('{公司}')">{公司}</span>
+          <span class="chip" onclick="insertVar('{岗位}')">{岗位}</span>
+          <span class="chip" onclick="insertVar('{姓名}')">{姓名}</span>
+          <span class="chip" onclick="insertVar('{学校}')">{学校}</span>
+          <span class="chip" onclick="insertVar('{专业}')">{专业}</span>
+          <span class="chip" onclick="insertVar('{备注}')">{备注}</span>
+        </div>
+        <div class="hint">个别公司要求不一样？不用改这里——在「投递清单」里点那家公司的「编辑」，可单独定制它的主题、正文和附件。</div>
+        <div style="display:flex; gap:10px; margin-top:12px;">
+          <button class="btn primary" onclick="saveTemplate()">保存模板</button>
+          <span class="hint" style="align-self:center;">每封邮件都会自动挂上「发送设置」里上传的简历附件</span>
+        </div>
+      </div>
+      <div class="card">
+        <h2>整封邮件预览 <span class="hint" style="font-weight:400;">（HR 收到的就是这个样子，选一条清单数据模拟）</span></h2>
+        <div class="field">
+          <select id="previewJob" onchange="renderPreview()"></select>
+        </div>
+        <div class="mail" id="previewBox"></div>
+        <div class="hint" style="margin-top:8px;">带 ⚡ 表示这条清单使用单独定制的主题/正文/附件；未定制的部分用全局模板。</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 发送设置 ============ -->
+  <section id="tab-cfg" class="tabpane">
+    <div class="grid">
+      <div class="card">
+        <h2>发件邮箱（QQ 邮箱）</h2>
+        <div class="field">
+          <label>QQ 邮箱地址</label>
+          <input id="cfgEmail" placeholder="例如：zhangsan@qq.com">
+        </div>
+        <div class="field">
+          <label>授权码 <span class="hint">（不是QQ密码！开通方法见「使用教程」标签页）</span></label>
+          <input id="cfgAuth" type="password" placeholder="16 位授权码">
+        </div>
+        <div class="field">
+          <label>发件人显示名（HR 看到的名字）</label>
+          <input id="cfgDisplay" placeholder="例如：张三-XX大学-求职">
+        </div>
+        <div class="grid" style="grid-template-columns:1fr 1fr; gap:10px;">
+          <div class="field"><label>我的姓名（{姓名}）</label><input id="cfgName" placeholder="张三"></div>
+          <div class="field"><label>我的学校（{学校}）</label><input id="cfgSchool" placeholder="XX大学"></div>
+        </div>
+        <div class="field"><label>我的专业（{专业}，部分公司命名格式会用到）</label><input id="cfgMajor" placeholder="例如：计算机科学与技术"></div>
+        <div class="grid" style="grid-template-columns:1fr 1fr; gap:10px;">
+          <div class="field"><label>每封间隔（秒，建议 ≥30）</label><input id="cfgInterval" type="number" min="5" value="40"></div>
+          <div class="field"><label>每日发送上限（封）</label><input id="cfgLimit" type="number" min="1" value="50"></div>
+        </div>
+        <button class="btn primary" onclick="saveConfig()">保存设置</button>
+      </div>
+      <div class="card">
+        <h2>简历附件（每封邮件都会带上）</h2>
+        <div class="hint" style="margin-bottom:10px;">建议只放 PDF 版简历，文件名建议改成「姓名-学校-应聘岗位.pdf」更专业；单个附件不超过 15MB。</div>
+        <input type="file" id="attInput" multiple style="margin-bottom:10px;">
+        <button class="btn" onclick="uploadAtt()">上传附件</button>
+        <div id="attList" style="margin-top:12px;"></div>
+        <div class="warnbox" style="margin-top:18px;">
+          🔒 <b>隐私说明</b>：授权码、清单、记录只保存在你这台电脑的 data 文件夹里，本软件不连接任何第三方服务器，数据不会外泄。退出软件：直接关闭启动时的黑色窗口即可。
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 使用教程 ============ -->
+  <section id="tab-help" class="tabpane">
+    <div class="card">
+      <h2>这个软件是干嘛的？（一句话）</h2>
+      <p style="line-height:2; font-size:13.5px;">
+        你平时在 QQ 邮箱里投简历：填收件人、写主题、写正文、拖简历附件、点发送，一家公司来一遍。
+        这个软件把这些重复动作替你做：<b>你写好一封"通用邮件"，它自动发给几十家公司，每封里的公司名、岗位名自动换成对应的，简历附件自动带上。</b>
+      </p>
+    </div>
+
+    <div class="card">
+      <h2>第一次使用（只需做一次，约 10 分钟）</h2>
+      <div class="steps">
+        <div class="step"><div class="num">1</div><p><b>准备材料</b><br>把简历存成 PDF，文件名建议改成「张三-XX大学-计算机科学与技术.pdf」。手机放身边，下一步要用。</p></div>
+        <div class="step"><div class="num">2</div><p><b>拿到"授权码"（5 分钟，唯一有点麻烦的一步）</b><br>
+          <span class="hint">授权码是什么：QQ 邮箱不允许外来软件用你的 QQ 密码发信，所以要先开通"软件发信权限"，开通后邮箱给你一串 16 位字母——它就是授权码，相当于给软件专用的密码。</span><br>
+          手把手操作：<br>
+          ① 电脑浏览器打开 <b>mail.qq.com</b>，用手机 QQ 扫码登录<br>
+          ② 页面<b>最上方</b>点「<b>设置</b>」→ 点进去后再点「<b>账号</b>」（有的版本写作"账户"）<br>
+          ③ 页面<b>一直往下拉</b>，拉到出现一个标题带 <b>POP3 / IMAP / SMTP</b> 这些英文字样的板块（别管这串英文是什么意思，它就是"允许软件收发你的邮件"的开关区）<br>
+          ④ 点第一行「POP3/SMTP 服务」右边的「<b>开启</b>」按钮 → 弹窗里点「生成授权码」→ 按页面提示用手机发一条短信（短信内容照它给的抄）→ 点"我已发送"<br>
+          ⑤ 页面会出现一个 <b>16 位字母</b>，比如 abcdwxyzabcdwxyz —— <b>立刻复制，存到手机备忘录！它只显示这一次</b>，关掉就再也看不到了（真忘了也没事：把开关关掉重新开一次，会生成新的）</p></div>
+        <div class="step"><div class="num">3</div><p><b>填进软件（2 分钟）</b><br>点软件顶部的「发送设置」：<br>· <b>QQ 邮箱地址</b>：填你的邮箱，如 123456789@qq.com<br>· <b>授权码</b>：粘贴刚才那 16 位字母（<b>不是 QQ 密码！</b>）<br>· <b>姓名 / 学校 / 专业</b>：填自己的，邮件里的 {姓名}{学校}{专业} 会自动替换成这些<br>· 点「保存设置」</p></div>
+        <div class="step"><div class="num">4</div><p><b>上传简历（1 分钟）</b><br>还在「发送设置」页面，往下看「简历附件」区：点「选择文件」→ 选中你的简历 PDF → 点「上传附件」。下面出现文件名就是成功了。</p></div>
+        <div class="step"><div class="num">5</div><p><b>写一封通用邮件（3 分钟）</b><br>点「邮件模板」标签页：主题和正文里可以放 {岗位}、{姓名} 这样的"占位词"，软件发信时自动换成真实内容——投字节跳动时 {公司} 自动变成"字节跳动"。右侧「整封邮件预览」能直接看到 HR 收到的效果。改完点「保存模板」。</p></div>
+      </div>
+      <div class="warnbox">
+        ⚠️ <b>三个重要提醒</b><br>
+        ① 授权码只填在这个软件里，别告诉任何人——有了它就能用你的邮箱发信。<br>
+        ② 发送间隔保持 30 秒以上、单日不超过 50 封（软件默认就是这样，别改小）。<br>
+        ③ 如果哪天突然全部失败、提示"登录失败"，多半是邮箱临时限制了，等几小时再发。
+      </div>
+      <div class="okbox">
+        ✅ <b>日常投递（设置做完一次后，每家公司只要 30 秒）</b><br>
+        <b>公司多 → 用 Excel：</b>「投递清单」点「⬇下载清单模板」→ 用 Excel 打开，一行填一家（公司 / 岗位 / 收件邮箱，备注可空）→ 保存 → 回软件点「📂导入 Excel」。<br>
+        <b>岗位怎么填：</b>招聘信息里写了岗位就照抄；只写了"需求专业"没写岗位的（比如群发校招），就填大类，如「2027届校园招聘」——别空着，邮件主题会用到它。<br>
+        <b>公司少 → 手动加：</b>「投递清单」点「＋添加投递目标」，填公司、岗位、邮箱，保存。<br>
+        <b>发送：</b>在清单里勾选要投的公司 → 点蓝色大按钮「开始投递」→ 确认。软件自动一封封发（默认 40 秒一封），下方有实时进度和日志，发完自动停。<br>
+        <b>记录：</b>随时点「⬇导出投递记录」，下载 Excel 记着投了谁、什么时候投的。
+      </div>
+      <div class="okbox" style="background:#eeedfe; border-color:#cecbf6;">
+        📦 <b>某家公司要求特殊怎么办？（比如：要发压缩包、主题要按它的格式写）</b><br>
+        例：某公司要求"以压缩包形式发送，命名格式：姓名-毕业学校-专业，附个人简历、推荐表、成绩单扫描件"。<br>
+        ① 在自己电脑上把简历+推荐表+成绩单打包成一个压缩包，按对方要求命名：<b>张三-XX大学-计算机科学与技术.zip</b><br>
+        ② 到「发送设置」上传这个压缩包<br>
+        ③ 到「投递清单」点该公司的「<b>编辑</b>」→ 在「这封邮件单独定制」区：主题、正文按对方要求填写，附件<b>只勾选</b>那个压缩包<br>
+        ④ 保存。这样发出去就完全符合它的要求，其他公司不受影响（清单里带 ⚡ 标记的就是做过定制的公司）
+      </div>
+      <div class="card" style="margin-top:16px;">
+        <h2>遇到问题看这里</h2>
+        <p class="hint" style="line-height:2;">
+          <b style="color:#374151">提示"登录失败"？</b> 十有八九是授权码填错了（它是 16 位字母，不是 QQ 密码）；也可能邮箱没开通服务——重做上面"第一次使用"的第 2 步。<br>
+          <b style="color:#374151">授权码忘了 / 当时没保存？</b> 回到邮箱设置页，把原来的开关"关闭"再"开启"，会生成新授权码，填新的即可。<br>
+          <b style="color:#374151">一批全部发送失败？</b> 邮箱可能临时限流了。等 1~2 小时，在清单里点「把失败/已发送重置为待发」，再投一次失败的。<br>
+          <b style="color:#374151">HR 的回复去哪看？</b> 你的 QQ 邮箱收件箱（也翻翻垃圾箱），建议每天看一次。<br>
+          <b style="color:#374151">会被封号吗？</b> 默认 40 秒一封、每天最多 50 封，远低于邮箱的风险线；不要自己把间隔改到 10 秒以下。<br>
+          <b style="color:#374151">正文能加粗、改颜色吗？</b> 软件发的是纯文本，求职邮件这样最稳妥：任何设备上显示一致、最不像广告邮件，HR 看到的就是你打的字。<br>
+          <b style="color:#374151">QQ 邮箱的「发信设置」要改吗？签名会带上吗？</b> 都不用动。软件直接走邮箱的发送通道，不经过网页写信界面；网页签名也不会自动附加，落款写在模板正文里就行。<br>
+          <b style="color:#374151">发送时注意什么？</b> 别关闭软件页面和启动时的黑色窗口；发送过程中可以去干别的，发完它会自动停。
+        </p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- 添加/编辑弹窗 -->
+<div class="overlay" id="editOverlay">
+  <div class="modal" style="width:560px; max-height:90vh; overflow-y:auto;">
+    <h3 id="editTitle">添加投递目标</h3>
+    <div class="grid" style="grid-template-columns:1fr 1fr; gap:10px;">
+      <div class="field"><label>公司名称</label><input id="fCompany" placeholder="例如：字节跳动"></div>
+      <div class="field"><label>岗位名称（招聘信息里没写具体岗位的，就填大类）</label><input id="fPosition" placeholder="有岗位填：后端开发；没岗位填：2027届校园招聘"></div>
+    </div>
+    <div class="field"><label>收件邮箱</label><input id="fEmail" placeholder="hr@company.com"></div>
+    <div class="field"><label>备注（可选，可用变量 {备注} 引用）</label><input id="fNote" placeholder="例如：要求压缩包投递、命名格式等"></div>
+    <div style="border-top:1px dashed #e5e7eb; margin:14px 0 10px; padding-top:12px;">
+      <b style="font-size:13px; color:#0c447c;">我的求职进展（自己随时改，跟发送无关）</b>
+      <div class="grid" style="grid-template-columns:1fr 1fr; gap:10px; margin-top:8px;">
+        <div class="field"><label>进展</label>
+          <select id="fProgressSel">
+            <option>未回音</option><option>笔试</option><option>面试</option><option>Offer</option><option>挂了</option><option>我放弃</option>
+          </select>
+        </div>
+        <div class="field"><label>重要日期（笔试/面试那天）</label><input type="date" id="fEventDate"></div>
+      </div>
+      <div class="field"><label>我的笔记（HR 说了什么、面试反馈、想记的都写这）</label><textarea id="fMyNote" style="height:80px; resize:vertical;" placeholder="例如：HR 说两周内给结果；面试官让准备项目介绍"></textarea></div>
+    </div>
+    <div style="border-top:1px dashed #e5e7eb; margin:14px 0 10px; padding-top:12px;">
+      <b style="font-size:13px; color:#0c447c;">这封邮件单独定制（可选）</b>
+      <div class="hint" style="margin:4px 0 10px;">有的公司要求不一样：留空就沿用「邮件模板」的全局内容；填了就以这里为准。</div>
+      <div class="field"><label>该公司的邮件主题（留空用全局）</label><input id="fSubject" placeholder="例如：应聘-{姓名}-毕业学校-专业"></div>
+      <div class="field"><label>该公司的邮件正文（留空用全局）</label><textarea id="fBody" style="height:110px;" placeholder="例如：尊敬的老师：您好！我是{学校}{专业}{姓名}…"></textarea></div>
+      <div class="field">
+        <label>该公司要带的附件 <span class="hint">（默认全部附件；像“要求压缩包投递”的公司，只勾它要的那一个即可）</span></label>
+        <div class="att-check" id="fAttList"></div>
+        <div class="hint" style="margin-top:4px;">没有附件可选？先到「发送设置」上传简历/成绩单/压缩包</div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeEdit()">取消</button>
+      <button class="btn primary" onclick="saveEdit()">保存</button>
+    </div>
+  </div>
+</div>
+<input type="file" id="importInput" accept=".xlsx,.xls" style="display:none;">
+<div id="toast"></div>
+
+<script>
+let JOBS = [], CONFIG = {}, TEMPLATE = {}, ATTS = [], EDIT_ID = null, pollTimer = null;
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function toast(msg, ok = true) {
+  const t = $("#toast");
+  t.textContent = msg;
+  t.style.background = ok ? "#1f2937" : "#a32d2d";
+  t.style.display = "block";
+  clearTimeout(t._h);
+  t._h = setTimeout(() => t.style.display = "none", 2600);
+}
+async function api(path, body) {
+  const opt = body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {};
+  const r = await fetch(path, opt);
+  return await r.json();
+}
+
+/* ---------- tabs ---------- */
+document.querySelectorAll("#nav button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("#nav button").forEach(x => x.classList.remove("active"));
+  document.querySelectorAll(".tabpane").forEach(x => x.classList.remove("active"));
+  b.classList.add("active");
+  $("#tab-" + b.dataset.tab).classList.add("active");
+  if (b.dataset.tab === "jobs") loadJobs();
+});
+
+/* ---------- jobs ---------- */
+async function loadJobs() {
+  const r = await api("/api/jobs");
+  JOBS = r.jobs || [];
+  renderJobs();
+  refreshPreviewSelect();
+  renderPreview();
+}
+function isCustom(j) { return !!(j.subject_override || j.body_override || (j.atts && j.atts.length)); }
+const PROGRESS = ["未回音", "笔试", "面试", "Offer", "挂了", "我放弃"];
+function daysUntil(dstr) {
+  if (!dstr) return null;
+  const d = new Date(dstr + "T23:59:59");
+  if (isNaN(d)) return null;
+  return Math.ceil((d.getTime() - Date.now()) / 86400000);
+}
+function renderStat() {
+  const sent = JOBS.filter(j => j.status === "已发送").length;
+  const wait = JOBS.filter(j => j.status === "待发").length;
+  const p = k => JOBS.filter(j => j.progress === k).length;
+  $("#statBar").innerHTML =
+    `<span>已投 <b>${sent}</b> 家</span>` +
+    `<span>待发 <b>${wait}</b></span>` +
+    `<span>未回音 <b>${sent ? sent - p("笔试") - p("面试") - p("Offer") - p("挂了") : 0}</b></span>` +
+    `<span>笔试 <b>${p("笔试")}</b></span>` +
+    `<span>面试 <b>${p("面试")}</b></span>` +
+    `<span class="off">Offer <b>${p("Offer")}</b></span>`;
+}
+function clearFilters() { $("#fSearch").value = ""; $("#fStatus").value = ""; $("#fProgress").value = ""; $("#fDate").value = ""; renderJobs(); }
+function setProgress(id, val) {
+  const j = JOBS.find(x => x.id === id);
+  if (j) j.progress = val;
+  api("/api/jobs/update", { id, progress: val }).then(r => { if (!r.ok) toast(r.error, false); });
+  renderJobs();
+}
+function renderJobs() {
+  const kw = ($("#fSearch").value || "").toLowerCase().trim();
+  const fs = $("#fStatus").value, fp = $("#fProgress").value, fd = $("#fDate").value;
+  const list = JOBS.filter(j => {
+    if (kw && !((j.company + j.position + j.email).toLowerCase().includes(kw))) return false;
+    if (fs && j.status !== fs) return false;
+    if (fp && j.progress !== fp) return false;
+    if (fd && (j.sent_at || "").slice(0, 10) !== fd) return false;
+    return true;
+  });
+  const tb = $("#jobRows");
+  tb.innerHTML = list.map(j => {
+    const tags = [];
+    if (j.subject_override) tags.push("主题");
+    if (j.body_override) tags.push("正文");
+    if (j.atts && j.atts.length) tags.push("附件×" + j.atts.length);
+    const du = daysUntil(j.event_date);
+    let evHtml = "";
+    if (du !== null) {
+      if (du > 3) evHtml = `<div class="evdate">📅 ${esc(j.event_date)}</div>`;
+      else if (du >= 0) evHtml = `<div class="evdate">⏰ ${esc(j.event_date)} ${du === 0 ? "（就是今天）" : "（还有" + du + "天）"}</div>`;
+      else evHtml = `<div class="evdate past">📅 ${esc(j.event_date)}</div>`;
+    }
+    const pgSel = `<select class="pg-select pg-${j.progress || "未回音"}" onchange="setProgress('${j.id}', this.value)">` +
+      PROGRESS.map(p => `<option ${p === (j.progress || "未回音") ? "selected" : ""}>${p}</option>`).join("") + `</select>` + evHtml;
+    return `
+    <tr data-id="${j.id}" class="${du !== null && du >= 0 && du <= 3 ? "soon" : ""}">
+      <td><input type="checkbox" class="rowcheck" ${j.status !== "已发送" ? "" : "disabled"} onchange="updateSel()"></td>
+      <td class="wrap"><b>${esc(j.company) || "—"}</b></td>
+      <td class="wrap">${esc(j.position) || "—"}</td>
+      <td>${esc(j.email)}</td>
+      <td class="wrap">${esc(j.note) || ""}</td>
+      <td>${pgSel}</td>
+      <td>${tags.length ? `<span class="custom-tag" title="该公司使用单独定制的内容">⚡ ${tags.join("·")}</span>` : `<span style="color:#c0c4cc;">全局</span>`}</td>
+      <td><span class="badge st-${j.status}">${j.status}</span>${j.error ? `<div class="err-text">${esc(j.error)}</div>` : ""}</td>
+      <td style="font-size:12px;color:#6b7280;">${esc(j.sent_at || "")}</td>
+      <td class="row-actions">
+        <button onclick="openEdit('${j.id}')">编辑</button>
+        <button class="del" onclick="deleteOne('${j.id}')">删除</button>
+      </td>
+    </tr>`;
+  }).join("");
+  $("#jobEmpty").style.display = JOBS.length ? "none" : "block";
+  const active = kw || fs || fp || fd;
+  $("#filterCount").textContent = active ? `筛出 ${list.length} / 共 ${JOBS.length} 条` : "";
+  updateSel();
+  renderStat();
+}
+function selectedIds() {
+  return [...document.querySelectorAll("#jobRows tr")].filter(tr => tr.querySelector(".rowcheck").checked).map(tr => tr.dataset.id);
+}
+function updateSel() { $("#selCount").textContent = selectedIds().length; }
+function toggleAll(cb) {
+  document.querySelectorAll("#jobRows .rowcheck").forEach(c => { if (!c.disabled) c.checked = cb.checked; });
+  updateSel();
+}
+
+async function openAdd() {
+  EDIT_ID = null; $("#editTitle").textContent = "添加投递目标";
+  ["fCompany","fPosition","fEmail","fNote","fSubject","fBody","fEventDate","fMyNote"].forEach(id => $("#"+id).value = "");
+  $("#fProgressSel").value = "未回音";
+  renderEditAtts(null);
+  $("#editOverlay").classList.add("show");
+}
+function openEdit(id) {
+  const j = JOBS.find(x => x.id === id); if (!j) return;
+  EDIT_ID = id; $("#editTitle").textContent = "编辑投递目标";
+  $("#fCompany").value = j.company; $("#fPosition").value = j.position; $("#fEmail").value = j.email; $("#fNote").value = j.note;
+  $("#fSubject").value = j.subject_override || ""; $("#fBody").value = j.body_override || "";
+  $("#fProgressSel").value = j.progress || "未回音"; $("#fEventDate").value = j.event_date || ""; $("#fMyNote").value = j.mynote || "";
+  renderEditAtts(j);
+  $("#editOverlay").classList.add("show");
+}
+function renderEditAtts(job) {
+  const chosen = (job && job.atts) ? job.atts : [];
+  const list = ATTS || [];
+  $("#fAttList").innerHTML = list.length ? list.map(a => `
+    <label><input type="checkbox" class="fatt" value="${esc(a.name)}" ${chosen.length ? (chosen.includes(a.name) ? "checked" : "") : "checked"}>
+      <span>${esc(a.name)}</span><span class="sz">${(a.size/1024).toFixed(0)} KB</span></label>`).join("")
+    : `<div class="empty" style="padding:14px 0;">附件库为空，请先到「发送设置」上传</div>`;
+}
+function closeEdit() { $("#editOverlay").classList.remove("show"); }
+async function saveEdit() {
+  const data = {
+    company: $("#fCompany").value, position: $("#fPosition").value, email: $("#fEmail").value, note: $("#fNote").value,
+    subject_override: $("#fSubject").value, body_override: $("#fBody").value,
+    progress: $("#fProgressSel").value, event_date: $("#fEventDate").value, mynote: $("#fMyNote").value,
+    atts: [...document.querySelectorAll(".fatt:checked")].map(c => c.value),
+  };
+  if (!data.email.includes("@")) return toast("收件邮箱格式不正确", false);
+  const hasAttLib = (ATTS || []).length > 0;
+  if (hasAttLib && !data.atts.length) return toast("至少勾选一个附件（求职邮件要带简历）", false);
+  if (EDIT_ID) { await api("/api/jobs/update", { id: EDIT_ID, ...data }); }
+  else { const r = await api("/api/jobs/add", data); if (!r.ok) return toast(r.error, false); }
+  closeEdit(); toast("已保存"); loadJobs();
+}
+async function deleteOne(id) { if (!confirm("确定删除这一条投递目标？")) return; await api("/api/jobs/delete", { ids: [id] }); loadJobs(); }
+async function deleteSelected() {
+  const ids = selectedIds(); if (!ids.length) return toast("先勾选要删除的目标", false);
+  if (!confirm("确定删除选中的 " + ids.length + " 条？")) return;
+  await api("/api/jobs/delete", { ids }); loadJobs();
+}
+async function resetFailed() {
+  await api("/api/jobs/reset", {}); toast("已把失败/已发送重置为待发（可重新投递）"); loadJobs();
+}
+
+/* ---------- Excel import ---------- */
+function pickImport() { $("#importInput").click(); }
+$("#importInput").onchange = async e => {
+  const file = e.target.files[0]; if (!file) return;
+  const b64 = await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result.split(",")[1]); fr.readAsDataURL(file); });
+  const r = await api("/api/jobs/import", { data: b64 });
+  e.target.value = "";
+  if (!r.ok) return toast(r.error, false);
+  toast(`导入完成：新增 ${r.added} 条${r.skipped ? `，跳过重复 ${r.skipped} 条` : ""}${r.invalid ? `，无效邮箱 ${r.invalid} 条` : ""}`);
+  loadJobs();
+};
+
+/* ---------- template ---------- */
+function insertVar(v) {
+  const el = document.activeElement === $("#tplBody") ? $("#tplBody") : $("#tplSubject");
+  const pos = el.selectionStart || el.value.length;
+  el.value = el.value.slice(0, pos) + v + el.value.slice(pos);
+  el.focus(); el.selectionStart = el.selectionEnd = pos + v.length;
+}
+async function saveTemplate() {
+  const r = await api("/api/template", { subject: $("#tplSubject").value, body: $("#tplBody").value });
+  if (r.ok) { toast("模板已保存"); TEMPLATE.subject = $("#tplSubject").value; TEMPLATE.body = $("#tplBody").value; renderPreview(); }
+}
+function refreshPreviewSelect() {
+  const sel = $("#previewJob");
+  const cur = sel.value;
+  sel.innerHTML = JOBS.map(j => {
+    const c = isCustom(j) ? " ⚡" : "";
+    return `<option value="${j.id}">${esc(j.company || j.email)}${c} · ${esc(j.position || "")}</option>`;
+  }).join("") || `<option value="">（暂无清单数据，用示例演示）</option>`;
+  if (cur && JOBS.some(j => j.id === cur)) sel.value = cur;
+}
+function renderPreview() {
+  const sel = $("#previewJob");
+  const job = JOBS.find(j => j.id === sel.value) || JOBS[0] ||
+    { company: "示例科技", position: "后端开发", email: "hr@example.com", note: "", subject_override: "", body_override: "", atts: [] };
+  const cfg = CONFIG;
+  const rep = t => (t || "").replaceAll("{公司}", job.company || "").replaceAll("{岗位}", job.position || "")
+    .replaceAll("{备注}", job.note || "").replaceAll("{姓名}", cfg.name || "")
+    .replaceAll("{学校}", cfg.school || "").replaceAll("{专业}", cfg.major || "");
+  const subject = rep(job.subject_override || TEMPLATE.subject || "");
+  const body = rep(job.body_override || TEMPLATE.body || "");
+  const chosen = (job.atts && job.atts.length) ? job.atts : (ATTS || []).map(a => a.name);
+  const attHtml = (ATTS || []).filter(a => chosen.includes(a.name))
+    .map(a => `📄 ${esc(a.name)} <span class="fa">(${(a.size/1024).toFixed(0)} KB)</span>`).join("<br>") || `<span class="fa">（无附件）</span>`;
+  $("#previewBox").innerHTML = `
+    <div class="mh">
+      <div><b>发件人</b>${esc(cfg.display_name || cfg.name || "我")} &lt;${esc(cfg.email || "未配置邮箱")}&gt;</div>
+      <div><b>收件人</b>${esc(job.email || "hr@example.com")}</div>
+      <div><b>主　题</b><span style="color:#0c447c;font-weight:600;">${esc(subject)}</span></div>
+    </div>
+    <div class="mb">${esc(body)}</div>
+    <div class="matts"><b style="font-weight:500;">附件：</b><br>${attHtml}</div>`;
+}
+
+/* ---------- config & attachments ---------- */
+async function loadState() {
+  const r = await api("/api/state");
+  CONFIG = r.config || {}; TEMPLATE = r.template || {}; ATTS = r.attachments || [];
+  $("#cfgEmail").value = CONFIG.email || "";
+  $("#cfgAuth").value = CONFIG.auth_code || "";
+  $("#cfgDisplay").value = CONFIG.display_name || "";
+  $("#cfgName").value = CONFIG.name || "";
+  $("#cfgSchool").value = CONFIG.school || "";
+  $("#cfgMajor").value = CONFIG.major || "";
+  $("#cfgInterval").value = CONFIG.interval || 40;
+  $("#cfgLimit").value = CONFIG.daily_limit || 50;
+  $("#tplSubject").value = TEMPLATE.subject || "";
+  $("#tplBody").value = TEMPLATE.body || "";
+  $("#qToday").textContent = r.today_sent; $("#qLimit").textContent = r.daily_limit;
+  renderAtt(r.attachments || []);
+  renderPreview();
+}
+async function saveConfig() {
+  const r = await api("/api/config", {
+    email: $("#cfgEmail").value, auth_code: $("#cfgAuth").value, display_name: $("#cfgDisplay").value,
+    name: $("#cfgName").value, school: $("#cfgSchool").value, major: $("#cfgMajor").value,
+    interval: $("#cfgInterval").value, daily_limit: $("#cfgLimit").value,
+  });
+  if (r.ok) { toast("设置已保存"); const s = await api("/api/state"); CONFIG = s.config || {}; renderPreview(); }
+}
+function renderAtt(list) {
+  $("#attList").innerHTML = list.length ? list.map(a => `
+    <div class="att-item">📄 <span>${esc(a.name)}</span><span class="size">${(a.size / 1024).toFixed(0)} KB</span>
+      <button class="btn danger" style="padding:3px 10px;" onclick="delAtt('${esc(a.name)}')">删除</button></div>`).join("")
+    : `<div class="empty">还没有附件，请上传简历 PDF</div>`;
+}
+async function uploadAtt() {
+  const files = $("#attInput").files; if (!files.length) return toast("先选择文件", false);
+  for (const f of files) {
+    const b64 = await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result.split(",")[1]); fr.readAsDataURL(f); });
+    const r = await api("/api/attachments", { name: f.name, data: b64 });
+    if (!r.ok) return toast(r.error, false);
+    ATTS = r.attachments; renderAtt(ATTS);
+  }
+  $("#attInput").value = ""; toast("附件已上传"); renderPreview();
+}
+async function delAtt(name) {
+  const r = await api("/api/attachments/delete", { name });
+  ATTS = r.attachments || []; renderAtt(ATTS); renderPreview();
+}
+
+/* ---------- send ---------- */
+async function startSend() {
+  const ids = selectedIds();
+  if (!ids.length) return toast("请先勾选要投递的目标", false);
+  const r = await api("/api/state");
+  if (!(r.config.email && r.config.auth_code)) {
+    toast("请先到「发送设置」填写 QQ 邮箱和授权码", false);
+    document.querySelector('#nav button[data-tab="cfg"]').click();
+    return;
+  }
+  if (!confirm(`即将投递 ${ids.length} 封邮件：\n· 每封间隔 ${r.config.interval} 秒，预计约 ${Math.round(ids.length * r.config.interval / 60)} 分钟\n· 每封自动替换 {公司}{岗位} 等变量并附上简历\n\n确认开始？`)) return;
+  const s = await api("/api/start", { ids });
+  if (!s.ok) return toast(s.error, false);
+  $("#progWrap").classList.add("show");
+  toast(`开始投递 ${s.count} 封`);
+  startPolling();
+}
+async function stopSend() { await api("/api/stop", {}); toast("正在停止，当前这封发完就停"); }
+function startPolling() {
+  clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    const s = await api("/api/status");
+    $("#qToday").textContent = s.today_sent;
+    if (s.running) {
+      $("#progBar").style.width = (s.total ? s.done / s.total * 100 : 0) + "%";
+      $("#progNum").textContent = s.done + "/" + s.total;
+      $("#progCurrent").textContent = s.current ? "正在发送：" + s.current : "等待下一封…";
+      $("#logBox").innerHTML = s.log.map(l => `<div class="log-${l.level}">[${l.time}] ${esc(l.text)}</div>`).join("");
+      $("#logBox").scrollTop = 1e9;
+      loadJobs();
+    } else {
+      clearInterval(pollTimer);
+      $("#progCurrent").textContent = "已结束";
+      $("#logBox").innerHTML = s.log.map(l => `<div class="log-${l.level}">[${l.time}] ${esc(l.text)}</div>`).join("");
+      $("#logBox").scrollTop = 1e9;
+      loadJobs();
+      toast("本轮投递已结束，可导出记录查看");
+    }
+  }, 2500);
+}
+
+/* ---------- init ---------- */
+loadState().then(loadJobs);
+</script>
+</body>
+</html>

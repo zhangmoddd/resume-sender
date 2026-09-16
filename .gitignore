@@ -1,0 +1,9 @@
+# 用户隐私数据：邮箱授权码、投递清单、发送记录、简历附件
+data/
+attachments/
+
+# 运行日志与临时文件
+_server_log.txt
+*.log
+__pycache__/
+*.pyc

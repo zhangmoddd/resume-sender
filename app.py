@@ -28,6 +28,8 @@ DATA_DIR = os.path.join(BASE, "data")
 ATTACH_DIR = os.path.join(BASE, "attachments")
 INDEX_HTML = os.path.join(BASE, "index.html")
 
+ATT_NOTE_FILE = "attachment_notes.json"   # {文件名: 备注文字}，备注只存在本机，不会随邮件发出
+
 SMTP_HOST = "smtp.qq.com"
 SMTP_PORT = 465
 
@@ -88,6 +90,8 @@ def init_dirs():
         save_json("template.json", DEFAULT_TEMPLATE)
     if not os.path.exists(_path("sent_log.json")):
         save_json("sent_log.json", [])
+    if not os.path.exists(_path(ATT_NOTE_FILE)):
+        save_json(ATT_NOTE_FILE, {})
 
 
 def get_config():
@@ -139,12 +143,37 @@ def render(tpl_text, job, cfg):
 
 
 # ---------------------------------------------------------------- 邮件发送
+def get_att_notes():
+    d = load_json(ATT_NOTE_FILE, {})
+    return d if isinstance(d, dict) else {}
+
+
+def set_att_note(name, note):
+    """写入/清除某个附件的备注（备注为空等于删掉备注）。备注只存本机，不会写进邮件。"""
+    d = get_att_notes()
+    note = (note or "").strip()
+    if note:
+        d[name] = note
+    else:
+        d.pop(name, None)
+    save_json(ATT_NOTE_FILE, d)
+    return d
+
+
+def drop_att_note(name):
+    d = get_att_notes()
+    if name in d:
+        d.pop(name)
+        save_json(ATT_NOTE_FILE, d)
+
+
 def list_attachments():
+    notes = get_att_notes()
     items = []
     for fn in sorted(os.listdir(ATTACH_DIR)):
         p = os.path.join(ATTACH_DIR, fn)
         if os.path.isfile(p):
-            items.append({"name": fn, "size": os.path.getsize(p)})
+            items.append({"name": fn, "size": os.path.getsize(p), "note": notes.get(fn, "")})
     return items
 
 
@@ -620,6 +649,12 @@ class Handler(BaseHTTPRequestHandler):
                 p = os.path.join(ATTACH_DIR, name)
                 if os.path.exists(p):
                     os.remove(p)
+                drop_att_note(name)
+                self._json({"ok": True, "attachments": list_attachments()})
+            elif path == "/api/attachments/note":
+                name = os.path.basename(str(body.get("name", "")))
+                if name and os.path.isfile(os.path.join(ATTACH_DIR, name)):
+                    set_att_note(name, str(body.get("note", "")))
                 self._json({"ok": True, "attachments": list_attachments()})
             elif path == "/api/start":
                 if SEND_STATE["running"]:

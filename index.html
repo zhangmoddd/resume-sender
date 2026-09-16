@@ -65,9 +65,14 @@
   .mail .matts { padding: 8px 14px; background: #f9fafb; border-top: 1px dashed #e5e7eb; font-size: 12px; color: #374151; }
   .mail .matts .fa { color: #9ca3af; }
   .custom-tag { display: inline-block; background: #eeedfe; color: #534ab7; border-radius: 4px; font-size: 11px; padding: 1px 6px; margin-right: 4px; }
-  .att-check { border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 10px; max-height: 150px; overflow-y: auto; }
-  .att-check label { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; cursor: pointer; }
-  .att-check .sz { color: #9ca3af; font-size: 12px; margin-left: auto; }
+  .att-check { border: 1px solid #e5e7eb; border-radius: 8px; padding: 2px 10px; max-height: 230px; overflow-y: auto; }
+  .att-check .att-row { display: flex; align-items: flex-start; gap: 8px; padding: 8px 0; border-bottom: 1px dashed #f0f1f3; cursor: pointer; }
+  .att-check .att-row:last-child { border-bottom: none; }
+  .att-check .att-row input[type=checkbox] { flex: none; width: 14px; height: 14px; margin: 3px 0 0; }
+  .att-check .att-main { flex: 1 1 auto; min-width: 0; }
+  .att-check .att-name { display: block; font-size: 13px; line-height: 1.6; word-break: break-all; }
+  .att-check .att-note { display: inline-block; margin-top: 3px; font-size: 12px; line-height: 1.6; color: #185fa5; background: #e6f1fb; border-radius: 6px; padding: 1px 8px; word-break: break-all; }
+  .att-check .sz { flex: none; color: #9ca3af; font-size: 12px; line-height: 1.6; white-space: nowrap; }
   /* 进展徽章与统计 */
   .pg-select { border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; padding: 2px 4px; background: #fff; max-width: 92px; }
   .pg-select.pg-笔试 { background:#faeeda; color:#854f0b; border-color:#f0d9b5; }
@@ -87,9 +92,16 @@
   .evdate { font-size: 11px; color: #854f0b; margin-top: 2px; }
   .evdate.past { color: #9ca3af; }
   .preview .psub { font-weight: 600; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px dashed #e5e7eb; }
-  .att-item { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px dashed #f0f1f3; font-size: 13px; }
-  .att-item .size { color: #9ca3af; font-size: 12px; }
-  .att-item button { margin-left: auto; }
+  .att-item { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px dashed #f0f1f3; font-size: 13px; }
+  .att-item:last-child { border-bottom: none; }
+  .att-item .att-main { flex: 1 1 auto; min-width: 0; }
+  .att-item .att-line { display: flex; align-items: baseline; gap: 8px; }
+  .att-item .fname { line-height: 1.6; word-break: break-all; }
+  .att-item .size { flex: none; margin-left: auto; color: #9ca3af; font-size: 12px; white-space: nowrap; }
+  .att-item .note-input { width: 100%; margin-top: 6px; border: 1px solid #e5e7eb; background: #f9fafb; border-radius: 8px; padding: 5px 9px; font-size: 12px; font-family: inherit; color: #374151; }
+  .att-item .note-input::placeholder { color: #c0c4cc; }
+  .att-item .note-input:focus { outline: none; border-color: #185fa5; background: #fff; }
+  .att-item button { flex: none; }
   /* 教程 */
   .steps { counter-reset: step; }
   .step { display: flex; gap: 14px; padding: 12px 0; border-bottom: 1px dashed #f0f1f3; }
@@ -101,9 +113,13 @@
   /* 弹窗 */
   .overlay { display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, .45); z-index: 50; align-items: center; justify-content: center; }
   .overlay.show { display: flex; }
-  .modal { background: #fff; border-radius: 14px; padding: 22px; width: 460px; max-width: 92vw; }
-  .modal h3 { font-size: 15px; margin-bottom: 14px; }
-  .modal-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  .modal { background: #fff; border-radius: 14px; width: 460px; max-width: 92vw; max-height: 90vh; display: flex; flex-direction: column; overflow: hidden; }
+  .modal-head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 16px 20px 12px 22px; border-bottom: 1px solid #f0f1f3; }
+  .modal-head h3 { font-size: 15px; margin: 0; }
+  .modal-close { flex: none; width: 30px; height: 30px; padding: 0; border: none; border-radius: 50%; background: #f2f4f7; color: #6b7280; font-size: 19px; line-height: 1; font-family: inherit; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+  .modal-close:hover { background: #e5e7eb; color: #1f2937; }
+  .modal-body { flex: 1 1 auto; overflow-y: auto; padding: 16px 22px 4px; }
+  .modal-foot { flex: none; display: flex; justify-content: flex-end; gap: 8px; padding: 12px 22px 16px; border-top: 1px solid #f0f1f3; background: #fff; }
   #toast { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); background: #1f2937; color: #fff; padding: 10px 20px; border-radius: 10px; font-size: 13px; display: none; z-index: 99; }
   .tabpane { display: none; } .tabpane.active { display: block; }
   .empty { text-align: center; color: #9ca3af; padding: 40px 0; font-size: 13px; }
@@ -253,7 +269,7 @@
       </div>
       <div class="card">
         <h2>简历附件（每封邮件都会带上）</h2>
-        <div class="hint" style="margin-bottom:10px;">建议只放 PDF 版简历，文件名建议改成「姓名-学校-应聘岗位.pdf」更专业；单个附件不超过 15MB。</div>
+        <div class="hint" style="margin-bottom:10px;">建议只放 PDF 版简历，文件名建议改成「姓名-学校-应聘岗位.pdf」更专业；单个附件不超过 15MB。<br>文件名差不多、分不清哪个是哪个？在每个文件下面写一句<b>备注</b>（只有你自己看得到，不会发给 HR），在清单里挑附件时就能对着备注选了。</div>
         <input type="file" id="attInput" multiple style="margin-bottom:10px;">
         <button class="btn" onclick="uploadAtt()">上传附件</button>
         <div id="attList" style="margin-top:12px;"></div>
@@ -331,8 +347,12 @@
 
 <!-- 添加/编辑弹窗 -->
 <div class="overlay" id="editOverlay">
-  <div class="modal" style="width:560px; max-height:90vh; overflow-y:auto;">
-    <h3 id="editTitle">添加投递目标</h3>
+  <div class="modal" style="width:560px;">
+    <div class="modal-head">
+      <h3 id="editTitle">添加投递目标</h3>
+      <button class="modal-close" onclick="closeEdit()" title="关闭" aria-label="关闭">×</button>
+    </div>
+    <div class="modal-body">
     <div class="grid" style="grid-template-columns:1fr 1fr; gap:10px;">
       <div class="field"><label>公司名称</label><input id="fCompany" placeholder="例如：字节跳动"></div>
       <div class="field"><label>岗位名称（招聘信息里没写具体岗位的，就填大类）</label><input id="fPosition" placeholder="有岗位填：后端开发；没岗位填：2027届校园招聘"></div>
@@ -359,8 +379,9 @@
       <div class="field">
         <label>该公司要带的附件 <span class="hint">（默认全部附件；像“要求压缩包投递”的公司，只勾它要的那一个即可）</span></label>
         <div class="att-check" id="fAttList"></div>
-        <div class="hint" style="margin-top:4px;">没有附件可选？先到「发送设置」上传简历/成绩单/压缩包</div>
+        <div class="hint" style="margin-top:4px;">没有附件可选？先到「发送设置」上传简历/成绩单/压缩包。文件名下面的蓝色小标签，就是你在「发送设置」里给这个文件写的备注。</div>
       </div>
+    </div>
     </div>
     <div class="modal-foot">
       <button class="btn" onclick="closeEdit()">取消</button>
@@ -510,9 +531,18 @@ function openEdit(id) {
 function renderEditAtts(job) {
   const chosen = (job && job.atts) ? job.atts : [];
   const list = ATTS || [];
-  $("#fAttList").innerHTML = list.length ? list.map(a => `
-    <label><input type="checkbox" class="fatt" value="${esc(a.name)}" ${chosen.length ? (chosen.includes(a.name) ? "checked" : "") : "checked"}>
-      <span>${esc(a.name)}</span><span class="sz">${(a.size/1024).toFixed(0)} KB</span></label>`).join("")
+  $("#fAttList").innerHTML = list.length ? list.map(a => {
+    const checked = chosen.length ? (chosen.includes(a.name) ? "checked" : "") : "checked";
+    return `
+    <label class="att-row">
+      <input type="checkbox" class="fatt" value="${esc(a.name)}" ${checked}>
+      <span class="att-main">
+        <span class="att-name">${esc(a.name)}</span>
+        ${a.note ? `<span class="att-note">备注：${esc(a.note)}</span>` : ``}
+      </span>
+      <span class="sz">${(a.size/1024).toFixed(0)} KB</span>
+    </label>`;
+  }).join("")
     : `<div class="empty" style="padding:14px 0;">附件库为空，请先到「发送设置」上传</div>`;
 }
 function closeEdit() { $("#editOverlay").classList.remove("show"); }
@@ -623,9 +653,24 @@ async function saveConfig() {
 }
 function renderAtt(list) {
   $("#attList").innerHTML = list.length ? list.map(a => `
-    <div class="att-item">📄 <span>${esc(a.name)}</span><span class="size">${(a.size / 1024).toFixed(0)} KB</span>
-      <button class="btn danger" style="padding:3px 10px;" onclick="delAtt('${esc(a.name)}')">删除</button></div>`).join("")
+    <div class="att-item">
+      <div class="att-main">
+        <div class="att-line">📄 <span class="fname">${esc(a.name)}</span><span class="size">${(a.size / 1024).toFixed(0)} KB</span></div>
+        <input class="note-input" type="text" data-name="${esc(a.name)}" value="${esc(a.note || "")}"
+               placeholder="点这里写个备注（只有你自己看得到）"
+               onchange="saveAttNote(this)">
+      </div>
+      <button class="btn danger" style="padding:3px 10px;" data-name="${esc(a.name)}" onclick="delAtt(this)">删除</button>
+    </div>`).join("")
     : `<div class="empty">还没有附件，请上传简历 PDF</div>`;
+}
+async function saveAttNote(el) {
+  const r = await api("/api/attachments/note", { name: el.dataset.name, note: el.value });
+  if (!r.ok) return toast(r.error, false);
+  ATTS = r.attachments || ATTS;
+  const hit = ATTS.find(a => a.name === el.dataset.name);
+  el.value = hit ? (hit.note || "") : "";
+  toast("备注已保存");
 }
 async function uploadAtt() {
   const files = $("#attInput").files; if (!files.length) return toast("先选择文件", false);
@@ -637,7 +682,9 @@ async function uploadAtt() {
   }
   $("#attInput").value = ""; toast("附件已上传"); renderPreview();
 }
-async function delAtt(name) {
+async function delAtt(btn) {
+  const name = btn.dataset.name;
+  if (!confirm(`确定删除附件「${name}」？`)) return;
   const r = await api("/api/attachments/delete", { name });
   ATTS = r.attachments || []; renderAtt(ATTS); renderPreview();
 }
@@ -684,6 +731,9 @@ function startPolling() {
 }
 
 /* ---------- init ---------- */
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && $("#editOverlay").classList.contains("show")) closeEdit();
+});
 loadState().then(loadJobs);
 </script>
 </body>

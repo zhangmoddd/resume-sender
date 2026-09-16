@@ -231,6 +231,19 @@
   .tagnone:hover { color: #185fa5; }
   .tagbar { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
   .tagbar .tb-label { font-size: 12px; color: #9ca3af; }
+  /* 标签库入口：放在那排标签最左边 */
+  .taglib-btn { border: 1px solid #cfe3f7; background: #f4f8fd; color: #185fa5; border-radius: 20px;
+                padding: 3px 12px; font-size: 12px; font-family: inherit; cursor: pointer; white-space: nowrap; }
+  .taglib-btn:hover { background: #e6f1fb; border-color: #185fa5; }
+  /* 标签库弹窗里的列表 */
+  .taglib { margin-top: 12px; max-height: 360px; overflow-y: auto;
+            border: 1px solid #f0f1f3; border-radius: 10px; padding: 2px 12px; }
+  .tlrow { display: flex; align-items: center; gap: 10px; padding: 8px 0;
+           border-bottom: 1px dashed #f0f1f3; font-size: 13px; }
+  .tlrow:last-child { border-bottom: none; }
+  .tlrow .tagchip { max-width: none; white-space: normal; word-break: break-word; }
+  .tlrow .tlcount { flex: none; margin-left: auto; color: #9ca3af; font-size: 12px; white-space: nowrap; }
+  .tlrow .lnk { flex: none; }
 
   /* ---------- 在线填表 ---------- */
   .sheet-modal { width: 1220px; max-width: 96vw; height: 90vh; }
@@ -721,6 +734,25 @@
   </div>
 </div>
 
+<!-- 标签库：所有标签都在这儿，能搜、能删（清单上方那排只铺最常用的几个） -->
+<div class="overlay" id="tagLibOverlay">
+  <div class="modal" style="width:600px;">
+    <div class="modal-head">
+      <h3>标签库 <span class="hint" style="font-weight:400;">你打过的所有标签都在这儿，能搜、能删</span></h3>
+      <button class="modal-close" onclick="closeTagLib()" title="关闭" aria-label="关闭">×</button>
+    </div>
+    <div class="modal-body">
+      <input class="tag-input" id="tagLibSearch" style="width:100%;"
+             placeholder="🔍 搜标签（比如：国企）" oninput="renderTagLib()">
+      <div class="taglib" id="tagLibList"></div>
+    </div>
+    <div class="modal-foot" style="justify-content:space-between;">
+      <span class="hint">点标签名 = 只看带它的条目；「删除」只摘标签，公司和投递记录都留着</span>
+      <button class="btn" onclick="closeTagLib()">关闭</button>
+    </div>
+  </div>
+</div>
+
 <!-- 附件在线预览（PDF 用浏览器自带阅读器，能放大、翻页、搜索） -->
 <div class="overlay" id="pvOverlay">
   <div class="modal pv-modal">
@@ -1011,12 +1043,17 @@ function renderJobs() {
   refreshTagUI();
 }
 /* ---------- 标签 ---------- */
-function allTags() {
-  const seen = [];
-  JOBS.forEach(j => (j.tags || []).forEach(t => { if (t && !seen.includes(t)) seen.push(t); }));
-  return seen;
+/* 每个标签各被用了几条 —— 按条数从多到少排。
+   清单上方那排只铺前几个，所以排在前面的必须是常用的，不然一折叠就看不见常用的了。 */
+function tagCounts() {
+  const m = new Map();
+  JOBS.forEach(j => (j.tags || []).forEach(t => {
+    if (t) m.set(t, (m.get(t) || 0) + 1);
+  }));
+  return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "zh"));
 }
-/* 清单上方那排标签：默认只铺前 14 个，多的收起来，免得占掉半屏 */
+function allTags() { return tagCounts().map(x => x[0]); }
+/* 清单上方那排标签：默认只铺前 14 个（按用得多排前面），多的收起来，免得占掉半屏 */
 const TAGBAR_SHOW = 14;
 let TAGBAR_EXPAND = false;
 function expandTagBar() { TAGBAR_EXPAND = true; refreshTagUI(); }
@@ -1029,18 +1066,22 @@ function refreshTagUI() {
   $("#fTag").value = [...$("#fTag").options].some(o => o.value === cur) ? cur : "";
 
   const bar = $("#tagBar"), now = $("#fTag").value;
-  bar.style.display = tags.length ? "flex" : "none";
-  if (!tags.length) return;
+  // 这排一直显示：左边那个「标签库」是管理入口，藏起来就找不到了
+  bar.style.display = "";
   // 正在筛的那个标签必须露出来，不然勾了看不见
   if (!TAGBAR_EXPAND && now && !tags.slice(0, TAGBAR_SHOW).includes(now)) TAGBAR_EXPAND = true;
   const show = TAGBAR_EXPAND ? tags : tags.slice(0, TAGBAR_SHOW);
   const rest = tags.length - show.length;
-  bar.innerHTML = `<span class="tb-label">标签（共 ${tags.length} 个）：</span>` +
-    show.map(t => `<span class="tagchip clickable${now === t ? " on" : ""}" data-tag="${esc(t)}" ` +
-                  `onclick="filterByTag(this.dataset.tag)" title="点一下只看带这个标签的">${esc(t)}</span>`).join("") +
-    (rest > 0 ? `<button class="tagnone" onclick="expandTagBar()" title="标签太多了，展开看全部">…展开（还有 ${rest} 个）</button>` : "") +
-    (TAGBAR_EXPAND && tags.length > TAGBAR_SHOW ? `<button class="tagnone" onclick="collapseTagBar()">收起</button>` : "") +
-    (now ? `<button class="tagnone" onclick="filterByTag('')" title="取消标签筛选">✕ 取消</button>` : "");
+  bar.innerHTML =
+    `<button class="taglib-btn" onclick="openTagLib()" title="标签库：看全部标签、删掉不用的">🏷 标签库</button>` +
+    (tags.length
+      ? `<span class="tb-label">标签（共 ${tags.length} 个）：</span>` +
+        show.map(t => `<span class="tagchip clickable${now === t ? " on" : ""}" data-tag="${esc(t)}" ` +
+                      `onclick="filterByTag(this.dataset.tag)" title="点一下只看带这个标签的">${esc(t)}</span>`).join("") +
+        (rest > 0 ? `<button class="tagnone" onclick="expandTagBar()" title="标签太多，展开看全部">…展开（还有 ${rest} 个）</button>` : "") +
+        (TAGBAR_EXPAND && tags.length > TAGBAR_SHOW ? `<button class="tagnone" onclick="collapseTagBar()">收起</button>` : "") +
+        (now ? `<button class="tagnone" onclick="filterByTag('')" title="取消标签筛选">✕ 取消</button>` : "")
+      : `<span class="tb-label">还没有标签。在清单里勾选公司 →「🏷 打标签」，打完这儿会列出来</span>`);
 }
 function filterByTag(t) {
   $("#fTag").value = (t && t === $("#fTag").value) ? "" : (t || "");
@@ -1107,19 +1148,39 @@ async function tagSelected() {
   await loadJobs();
   toast(`已给 ${r.count} 条打上标签` + droppedNote(r.tags_dropped));
 }
-async function clearTagOne() {
-  const tags = allTags();
-  if (!tags.length) return;
-  const pick = prompt("要删掉哪个标签？\n（只把标签从清单条目上摘掉，条目本身不删；填标签名，或填前面的序号）\n\n" +
-                      tags.map((t, i) => `${i + 1}. ${t}`).join("\n"), "");
-  if (pick === null || !pick.trim()) return;
-  const target = tags.find(t => t === pick.trim()) || tags[Number(pick.trim()) - 1];
-  if (!target) return toast("没找到这个标签", false);
-  const r = await api("/api/jobs/tag", { ids: JOBS.map(j => j.id), tags: [target], mode: "remove" });
+/* ---------- 标签库：所有标签都收在这儿，能搜、能删 ---------- */
+function openTagLib() {
+  $("#tagLibSearch").value = "";
+  renderTagLib();
+  $("#tagLibOverlay").classList.add("show");
+}
+function closeTagLib() { $("#tagLibOverlay").classList.remove("show"); }
+function renderTagLib() {
+  const kw = ($("#tagLibSearch").value || "").toLowerCase().trim();
+  const all = tagCounts();
+  const list = kw ? all.filter(x => x[0].toLowerCase().includes(kw)) : all;
+  $("#tagLibList").innerHTML = list.length ? list.map(([t, n]) => `
+    <div class="tlrow">
+      <span class="tagchip clickable" data-tag="${esc(t)}" onclick="pickTagFromLib(this.dataset.tag)"
+            title="点一下 → 清单只显示带这个标签的">${esc(t)}</span>
+      <span class="tlcount">${n} 条</span>
+      <button class="lnk" style="color:#a32d2d;" data-tag="${esc(t)}" onclick="delTagFromLib(this.dataset.tag)"
+              title="从所有条目上摘掉这个标签">删除</button>
+    </div>`).join("")
+    : `<div class="empty" style="padding:22px 0;">${all.length
+        ? "没有匹配的标签，换个词搜搜"
+        : "还没有标签。在清单里勾选公司 → 点「🏷 打标签」"}</div>`;
+}
+function pickTagFromLib(t) { closeTagLib(); filterByTag(t); }
+async function delTagFromLib(t) {
+  const n = (tagCounts().find(x => x[0] === t) || [, 0])[1];
+  if (!confirm(`把标签「${t}」从 ${n} 条记录上摘掉？\n\n只摘标签，公司和投递记录都留着，不会删。`)) return;
+  const r = await api("/api/jobs/tag", { ids: JOBS.map(j => j.id), tags: [t], mode: "remove" });
   if (!r.ok) return toast(r.error, false);
-  if ($("#fTag").value === target) $("#fTag").value = "";
+  if ($("#fTag").value === t) $("#fTag").value = "";
   await loadJobs();
-  toast(`标签「${target}」已从清单里摘掉`);
+  renderTagLib();
+  toast(`标签「${t}」已从 ${n} 条记录上摘掉`);
 }
 function selectedIds() {
   return [...document.querySelectorAll("#jobRows tr")].filter(tr => tr.querySelector(".rowcheck").checked).map(tr => tr.dataset.id);
@@ -1954,6 +2015,7 @@ document.addEventListener("keydown", e => {
   if ($("#pvOverlay").classList.contains("show")) return closePreview();
   if ($("#attListOverlay").classList.contains("show")) return closeAttList();
   if ($("#tagListOverlay").classList.contains("show")) return closeTagList();
+  if ($("#tagLibOverlay").classList.contains("show")) return closeTagLib();
   if ($("#histOverlay").classList.contains("show")) return closeHist();
   if ($("#editOverlay").classList.contains("show")) closeEdit();
 });

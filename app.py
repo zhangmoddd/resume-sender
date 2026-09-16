@@ -355,22 +355,49 @@ def render_image_page(path):
 
 _GUI_PY = {"exe": None}
 
+LOCAL_PY_FILE = os.path.join(DATA_DIR, "local_python.txt")
+
+
+def local_python_paths():
+    """读 data/local_python.txt：一行一个 Python 路径（本机专用，已排除在 Git 之外）。
+
+    用途：自动探测万一找不到合适的解释器，用户可以在这里手写一个。
+    """
+    out = []
+    try:
+        with open(LOCAL_PY_FILE, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    out.append(line)
+    except OSError:
+        pass
+    return out
+
 
 def find_gui_python():
     """找一个同时装了 tkinter 和 pypdf 的 Python，用来跑独立合并工具。
 
     坑：本软件自己跑在精简环境里，那个 Python 只有 pypdf、没有 tkinter，
     所以不能直接用 sys.executable（会报 No module named 'tkinter'，窗口根本开不出来）。
-    这里按顺序挨个试，逻辑和「合并PDF.bat」保持一致，探测结果缓存起来。
+    按顺序挨个试，探测结果缓存起来。一个都找不到时返回 None。
     """
     if _GUI_PY["exe"]:
         return _GUI_PY["exe"]
 
     here = sys.executable or ""
+    home = os.environ.get("USERPROFILE") or os.path.expanduser("~")
     cands = []
     for c in (
+        *local_python_paths(),
         os.path.join(os.path.dirname(here), "pythonw.exe") if here else "",
         here,
+        shutil.which("pythonw") or "",
+        shutil.which("python") or "",
+        os.path.join(home, "miniconda3", "python.exe") if home else "",
+        os.path.join(home, "anaconda3", "python.exe") if home else "",
+        r"C:\ProgramData\miniconda3\python.exe",
+        r"C:\ProgramData\Anaconda3\python.exe",
         "pythonw",
         "python",
     ):

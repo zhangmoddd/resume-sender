@@ -3,8 +3,22 @@ title PDF Merge Tool
 setlocal
 
 rem ---- Find a Python that has BOTH tkinter and pypdf. Order matters. ----
+
+rem 1) A path you wrote into data\local_python.txt
+rem    (machine-specific, one line, NOT committed to Git)
 set "PY="
 set "PYW="
+set "LOCALPY="
+if exist "%~dp0data\local_python.txt" set /p LOCALPY=<"%~dp0data\local_python.txt"
+if defined LOCALPY if exist "%LOCALPY%" (
+    "%LOCALPY%" -c "import tkinter, pypdf" >nul 2>&1
+    if not errorlevel 1 (
+        set "PY=%LOCALPY%"
+        set "PYW=%LOCALPY%"
+    )
+)
+
+rem 2) Common install locations (no usernames baked in, uses %USERPROFILE%)
 for %%P in (
 "%USERPROFILE%\.workbuddy\binaries\python\envs\default\Scripts\python.exe"
 "%USERPROFILE%\miniconda3\python.exe"
@@ -21,6 +35,7 @@ for %%P in (
     )
 )
 
+rem 3) Whatever is on PATH
 if not defined PY (
     python -c "import tkinter, pypdf" >nul 2>&1
     if not errorlevel 1 (
@@ -33,7 +48,8 @@ if not defined PY (
     echo.
     echo   [ERROR] No Python with tkinter + pypdf was found.
     echo.
-    echo   Do NOT close this window. Take a screenshot and send it to the assistant.
+    echo   Install one, or write its full path into data\local_python.txt
+    echo   ^(one line, for example: D:\somewhere\python.exe^)
     echo.
     pause
     exit /b 1

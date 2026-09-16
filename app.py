@@ -2,6 +2,7 @@
 """
 简历批量投递助手 - 本地服务
 功能：投递清单管理（增删改查 / Excel 导入导出）、邮件模板（变量替换）、
+     证明材料合并成一个 PDF（PDF + 图片混拼，图片自动摆正 / 压到 A4）、
      QQ 邮箱 SMTP 批量发送（间隔控制 / 每日上限 / 失败记录 / 中途停止）
 说明：所有数据只保存在本机 data/ 与 attachments/ 目录中，不经过任何第三方服务器。
 """
@@ -9,8 +10,10 @@ import base64
 import io
 import json
 import os
+import shutil
 import smtplib
 import socket
+import tempfile
 import threading
 import time
 import webbrowser
@@ -29,6 +32,17 @@ ATTACH_DIR = os.path.join(BASE, "attachments")
 INDEX_HTML = os.path.join(BASE, "index.html")
 
 ATT_NOTE_FILE = "attachment_notes.json"   # {文件名: 备注文字}，备注只存在本机，不会随邮件发出
+
+# ---------------------------------------------------------------- 材料合并
+# 暂存区：用户丢进来的证明材料先放这儿，排好顺序再合成。
+# 顺序直接写进文件名开头的序号（001__、002__…），所以关掉软件再打开顺序也不会乱。
+MERGE_DIR = os.path.join(DATA_DIR, "_merge_staging")
+
+A4_W, A4_H = 595.28, 841.89   # A4 纸尺寸，单位「点」（1 点 = 1/72 英寸）
+MERGE_DPI = 144               # 图片放进 PDF 的分辨率。144 够 HR 看清，文件也不会太大
+MERGE_MARGIN = 0.04           # 页面四周留 4% 白边，证书照片贴着纸边不好看、打印也容易被切
+
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif", ".tif", ".tiff"}
 
 SMTP_HOST = "smtp.qq.com"
 SMTP_PORT = 465
@@ -82,6 +96,7 @@ def save_json(name, obj):
 def init_dirs():
     os.makedirs(DATA_DIR, exist_ok=True)
     os.makedirs(ATTACH_DIR, exist_ok=True)
+    os.makedirs(MERGE_DIR, exist_ok=True)
     if not os.path.exists(_path("config.json")):
         save_json("config.json", DEFAULT_CONFIG)
     if not os.path.exists(_path("jobs.json")):
@@ -175,6 +190,223 @@ def list_attachments():
         if os.path.isfile(p):
             items.append({"name": fn, "size": os.path.getsize(p), "note": notes.get(fn, "")})
     return items
+
+
+# ---------------------------------------------------------------- 材料合并
+def safe_fname(name):
+    """只保留文件名本身（去掉路径），再把 Windows 不认的字符换成下划线。"""
+    name = os.path.basename(str(name or "")).strip()
+    for ch in '\\/:*?"<>|':
+        name = name.replace(ch, "_")
+    return name or "未命名"
+
+
+def is_pdf_name(name):
+    return os.path.splitext(name)[1].lower() == ".pdf"
+
+
+def is_image_name(name):
+    return os.path.splitext(name)[1].lower() in IMAGE_EXTS
+
+
+def pdf_page_count(path):
+    """读 PDF 页数；读不了（加密/损坏）返回 None。"""
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(path)
+        if getattr(reader, "is_encrypted", False):
+            try:
+                reader.decrypt("")
+            except Exception:
+                pass
+        return len(reader.pages)
+    except Exception:
+        return None
+
+
+def _staged_files():
+    """暂存区里所有文件，按文件名开头的序号排好。"""
+    if not os.path.isdir(MERGE_DIR):
+        return []
+    out = []
+    for fn in sorted(os.listdir(MERGE_DIR)):
+        p = os.path.join(MERGE_DIR, fn)
+        if os.path.isfile(p) and "__" in fn:
+            out.append((fn, fn.split("__", 1)[1]))
+    return out
+
+
+def merge_list():
+    items = []
+    for stored, shown in _staged_files():
+        p = os.path.join(MERGE_DIR, stored)
+        kind = "pdf" if is_pdf_name(shown) else ("image" if is_image_name(shown) else "other")
+        items.append({
+            "id": stored,
+            "name": shown,
+            "size": os.path.getsize(p),
+            "kind": kind,
+            "ok": kind in ("pdf", "image"),
+            "pages": pdf_page_count(p) if kind == "pdf" else (1 if kind == "image" else 0),
+        })
+    return items
+
+
+def merge_add(name, data):
+    """把上传的文件放进暂存区，序号续在最后。"""
+    os.makedirs(MERGE_DIR, exist_ok=True)
+    shown = safe_fname(name)
+    used = [int(f.split("__", 1)[0]) for f, _ in _staged_files() if f.split("__", 1)[0].isdigit()]
+    seq = (max(used) + 1) if used else 1
+    while True:
+        target = os.path.join(MERGE_DIR, "%03d__%s" % (seq, shown))
+        if not os.path.exists(target):
+            break
+        seq += 1
+    with open(target, "wb") as f:
+        f.write(data)
+    return target
+
+
+def merge_move(fid, direction):
+    """把某个文件往上/往下挪一格：交换两个文件的序号。"""
+    ids = [stored for stored, _ in _staged_files()]
+    if fid not in ids:
+        return
+    i = ids.index(fid)
+    j = i + (-1 if direction < 0 else 1)
+    if j < 0 or j >= len(ids):
+        return
+    a, b = ids[i], ids[j]
+    seq_a, name_a = a.split("__", 1)
+    seq_b, name_b = b.split("__", 1)
+    tmp = os.path.join(MERGE_DIR, "000__swap.tmp")
+    os.replace(os.path.join(MERGE_DIR, a), tmp)
+    os.replace(os.path.join(MERGE_DIR, b), os.path.join(MERGE_DIR, seq_a + "__" + name_b))
+    os.replace(tmp, os.path.join(MERGE_DIR, seq_b + "__" + name_a))
+
+
+def merge_remove(fid):
+    p = os.path.join(MERGE_DIR, os.path.basename(fid))
+    if os.path.isfile(p):
+        os.remove(p)
+    # 删掉一个以后，把剩下的序号重新排成 001、002… 保持连续
+    rest = _staged_files()
+    for new_i, (stored, shown) in enumerate(rest, 1):
+        want = "%03d__%s" % (new_i, shown)
+        if want != stored:
+            os.replace(os.path.join(MERGE_DIR, stored), os.path.join(MERGE_DIR, want))
+
+
+def merge_clear():
+    for stored, _ in _staged_files():
+        try:
+            os.remove(os.path.join(MERGE_DIR, stored))
+        except OSError:
+            pass
+
+
+def render_image_page(path):
+    """把一张图片画到一页 A4 白纸上：按比例缩到放得下，居中，四周留白。
+
+    手机拍的照片常带"躺倒"的方向信息，先按它摆正。
+    图是横的就用 A4 横向，是竖的就用 A4 纵向，免得横版证书被压得很小。
+    返回 (PIL 图片, 输出 DPI)。
+    """
+    from PIL import Image, ImageOps
+
+    im = Image.open(path)
+    im.load()
+    fixed = ImageOps.exif_transpose(im)
+    if fixed is not None:
+        im = fixed
+
+    # 透明背景（PNG）先垫成白的，不然 PDF 里会变黑块
+    if im.mode in ("RGBA", "LA", "P"):
+        im = im.convert("RGBA")
+        bg = Image.new("RGB", im.size, "white")
+        bg.paste(im, mask=im.split()[-1])
+        im = bg
+    elif im.mode != "RGB":
+        im = im.convert("RGB")
+
+    pw, ph = (A4_H, A4_W) if im.width > im.height else (A4_W, A4_H)
+    k = MERGE_DPI / 72.0
+    cw = max(1, int(round(pw * k)))
+    ch = max(1, int(round(ph * k)))
+    canvas = Image.new("RGB", (cw, ch), "white")
+
+    mx = int(cw * MERGE_MARGIN)
+    my = int(ch * MERGE_MARGIN)
+    box_w = max(1, cw - mx * 2)
+    box_h = max(1, ch - my * 2)
+    ratio = min(box_w / im.width, box_h / im.height)
+    nw = max(1, int(round(im.width * ratio)))
+    nh = max(1, int(round(im.height * ratio)))
+    if (nw, nh) != im.size:
+        im = im.resize((nw, nh), Image.LANCZOS)
+    canvas.paste(im, ((cw - nw) // 2, (ch - nh) // 2))
+
+    # 用页面宽度反推 DPI，让 PDF 里的页面尺寸正好等于 A4（避免取整误差）
+    return canvas, cw * 72.0 / pw
+
+
+def merge_run(out_name):
+    """按暂存区顺序合成一个 PDF，直接放进附件库。返回 (文件名, 页数, 字节数)。"""
+    from pypdf import PdfReader, PdfWriter
+
+    picked = [it for it in merge_list() if it["ok"]]
+    if not picked:
+        raise ValueError("暂存区里还没有可合并的文件（支持 PDF 和图片）")
+
+    writer = PdfWriter()
+    pages = 0
+    tmpdir = tempfile.mkdtemp(prefix="merge_")
+    try:
+        for it in picked:
+            src = os.path.join(MERGE_DIR, it["id"])
+            if it["kind"] == "pdf":
+                reader = PdfReader(src)
+                if getattr(reader, "is_encrypted", False):
+                    try:
+                        reader.decrypt("")
+                    except Exception:
+                        pass
+                for page in reader.pages:
+                    writer.add_page(page)
+                pages += len(reader.pages)
+                continue
+
+            # 图片：先画到 A4 白纸上，存成临时单页 PDF，再把这页搬过来
+            canvas, dpi = render_image_page(src)
+            tmp_pdf = os.path.join(tmpdir, "img_%03d.pdf" % pages)
+            canvas.save(tmp_pdf, "PDF", resolution=dpi)
+            canvas.close()
+            one = PdfReader(tmp_pdf)
+            for page in one.pages:
+                writer.add_page(page)
+            pages += len(one.pages)
+
+        if pages == 0:
+            raise ValueError("没拼出任何页面，请检查添加的文件")
+
+        out_name = safe_fname(out_name or "证明材料")
+        if not out_name.lower().endswith(".pdf"):
+            out_name += ".pdf"
+        target = os.path.join(ATTACH_DIR, out_name)
+        base, ext = os.path.splitext(out_name)
+        i = 1
+        while os.path.exists(target):
+            target = os.path.join(ATTACH_DIR, "%s(%d)%s" % (base, i, ext))
+            i += 1
+
+        tmp_out = target + ".part"
+        with open(tmp_out, "wb") as f:
+            writer.write(f)
+        os.replace(tmp_out, target)
+        return os.path.basename(target), pages, os.path.getsize(target)
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 def resolve_attachments(job):
@@ -493,6 +725,7 @@ class Handler(BaseHTTPRequestHandler):
                     "today_sent": today_sent_count(),
                     "daily_limit": cfg.get("daily_limit", 50),
                     "attachments": list_attachments(),
+                    "merge_files": merge_list(),
                 })
             elif path == "/api/jobs":
                 self._json({"ok": True, "jobs": get_jobs()})
@@ -656,6 +889,34 @@ class Handler(BaseHTTPRequestHandler):
                 if name and os.path.isfile(os.path.join(ATTACH_DIR, name)):
                     set_att_note(name, str(body.get("note", "")))
                 self._json({"ok": True, "attachments": list_attachments()})
+            elif path == "/api/merge/add":
+                data = base64.b64decode(body.get("data", ""))
+                if not data:
+                    self._json({"ok": False, "error": "文件是空的，没收到内容"})
+                    return
+                if len(data) > 30 * 1024 * 1024:
+                    self._json({"ok": False, "error": "单个文件超过 30MB，请先压缩一下"})
+                    return
+                merge_add(body.get("name", ""), data)
+                self._json({"ok": True, "files": merge_list()})
+            elif path == "/api/merge/move":
+                merge_move(str(body.get("id", "")), int(body.get("dir", 0) or 0))
+                self._json({"ok": True, "files": merge_list()})
+            elif path == "/api/merge/remove":
+                merge_remove(str(body.get("id", "")))
+                self._json({"ok": True, "files": merge_list()})
+            elif path == "/api/merge/clear":
+                merge_clear()
+                self._json({"ok": True, "files": merge_list()})
+            elif path == "/api/merge/run":
+                try:
+                    out, pages, size = merge_run(str(body.get("name", "")))
+                except ValueError as e:
+                    self._json({"ok": False, "error": str(e)})
+                    return
+                merge_clear()
+                self._json({"ok": True, "output": out, "pages": pages, "size": size,
+                            "attachments": list_attachments(), "files": merge_list()})
             elif path == "/api/start":
                 if SEND_STATE["running"]:
                     self._json({"ok": False, "error": "已有投递任务在进行中"})

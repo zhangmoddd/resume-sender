@@ -102,6 +102,25 @@
   .att-item .note-input::placeholder { color: #c0c4cc; }
   .att-item .note-input:focus { outline: none; border-color: #185fa5; background: #fff; }
   .att-item button { flex: none; }
+  /* 材料合并 */
+  .merge-list { margin-top: 12px; border: 1px solid #e5e7eb; border-radius: 10px; padding: 2px 12px; max-height: 380px; overflow-y: auto; }
+  .mrow { display: flex; align-items: flex-start; gap: 10px; padding: 9px 0; border-bottom: 1px dashed #f0f1f3; font-size: 13px; }
+  .mrow:last-child { border-bottom: none; }
+  .mrow .mseq { flex: none; width: 24px; height: 24px; border-radius: 6px; background: #e6f1fb; color: #185fa5; font-size: 12px; display: flex; align-items: center; justify-content: center; }
+  .mrow .mmain { flex: 1 1 auto; min-width: 0; }
+  .mrow .mname { line-height: 1.6; word-break: break-all; }
+  .mrow .mmeta { color: #9ca3af; font-size: 12px; line-height: 1.6; }
+  .mrow .mmeta.bad { color: #a32d2d; }
+  .mrow .mops { flex: none; display: flex; gap: 4px; align-items: center; }
+  .mbtn { border: 1px solid #d1d5db; background: #fff; color: #6b7280; border-radius: 6px; height: 26px; min-width: 26px; padding: 0 6px; font-size: 13px; line-height: 1; font-family: inherit; cursor: pointer; }
+  .mbtn:hover:not(:disabled) { border-color: #185fa5; color: #185fa5; }
+  .mbtn:disabled { opacity: .35; cursor: not-allowed; }
+  .mbtn.del { color: #a32d2d; padding: 0 9px; }
+  .mbtn.del:hover { border-color: #a32d2d; }
+  .merge-foot { margin-top: 14px; display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+  .merge-foot .field { flex: 1 1 260px; margin: 0; }
+  .merge-sum { font-size: 13px; color: #374151; margin-top: 10px; }
+  .merge-sum b { color: #185fa5; }
   /* 教程 */
   .steps { counter-reset: step; }
   .step { display: flex; gap: 14px; padding: 12px 0; border-bottom: 1px dashed #f0f1f3; }
@@ -135,6 +154,7 @@
   <button data-tab="jobs" class="active">投递清单</button>
   <button data-tab="tpl">邮件模板</button>
   <button data-tab="cfg">发送设置</button>
+  <button data-tab="merge">材料合并</button>
   <button data-tab="help">使用教程</button>
 </nav>
 
@@ -280,6 +300,40 @@
     </div>
   </section>
 
+  <!-- ============ 材料合并 ============ -->
+  <section id="tab-merge" class="tabpane">
+    <div class="card">
+      <h2>把证明材料合成一个 PDF</h2>
+      <p class="hint" style="line-height:1.9; margin-bottom:12px;">
+        <b style="color:#374151">这里只放「简历之外」的材料</b>：学籍证明、成绩排名、证书、推荐表……
+        它们合成一份 PDF 之后，再加上你单独的简历 PDF，一封邮件里就<b>只有两个附件</b>——
+        HR 不用下十几次、不用解压、不用一个个点开。<br>
+        顺带解决手机照片发不出去的问题：手机拍一张证书 3~5MB，十张就 40MB 以上，邮件根本发不出去。
+        合成时会自动把照片摆正、按 A4 铺好、压到 144dpi，10 页大约 2~3MB。
+      </p>
+      <input type="file" id="mergeInput" multiple accept=".pdf,.jpg,.jpeg,.png,.bmp,.webp,.gif,.tif,.tiff" style="margin-bottom:10px;">
+      <div class="toolbar" style="margin-bottom:0;">
+        <button class="btn primary" onclick="addMergeFiles()">＋ 添加文件</button>
+        <button class="btn" onclick="clearMerge()">清空列表</button>
+        <span class="spacer"></span>
+        <span class="hint">列表顺序 = 合成后 PDF 的页序，用 ↑ ↓ 调</span>
+      </div>
+      <div class="merge-list" id="mergeList"></div>
+      <div class="merge-sum" id="mergeSum"></div>
+      <div class="merge-foot">
+        <div class="field">
+          <label>合成后的文件名</label>
+          <input id="mergeOutName" placeholder="例如：张三-证明材料.pdf">
+        </div>
+        <button class="btn primary big" onclick="runMerge()">📄 合成 PDF</button>
+      </div>
+      <div class="okbox" style="margin-top:16px;">
+        ✅ 合成好的文件会直接出现在「发送设置」的附件库里，回那儿勾上就能发。<br>
+        💡 顺序建议按「重要程度」排：最想让 HR 看到的放最前面（一般是学籍证明、成绩排名）。
+      </div>
+    </div>
+  </section>
+
   <!-- ============ 使用教程 ============ -->
   <section id="tab-help" class="tabpane">
     <div class="card">
@@ -327,6 +381,20 @@
         ② 到「发送设置」上传这个压缩包<br>
         ③ 到「投递清单」点该公司的「<b>编辑</b>」→ 在「这封邮件单独定制」区：主题、正文按对方要求填写，附件<b>只勾选</b>那个压缩包<br>
         ④ 保存。这样发出去就完全符合它的要求，其他公司不受影响（清单里带 ⚡ 标记的就是做过定制的公司）
+      </div>
+      <div class="okbox" style="background:#eaf3de; border-color:#d3e7b8;">
+        📎 <b>让 HR 少点几次的招：把材料并成两个附件</b><br>
+        <b>问题</b>：证明材料一多（学籍证明、成绩排名、证书、推荐表……），邮件里挂七八个附件，
+        HR 要下七八次、开七八个文件，看着就烦、还容易漏看。<br>
+        <b>做法</b>：<br>
+        ① 简历单独一份 PDF —— 你本来就有，这已经够专业了；<br>
+        ② 其余材料全部并成一份：点顶部「<b>材料合并</b>」→ 把学籍证明、成绩排名、证书的照片或 PDF 都加进去
+        → 用 ↑↓ 把顺序排成你想给 HR 看的顺序 → 点「合成 PDF」；<br>
+        ③ 合出来直接进附件库。发送时勾这<b>两个</b>，邮件里就只有两个附件。<br>
+        <b>顺带解决一个坑</b>：手机拍一张证书 3~5MB，十张就 40MB 以上，邮件根本发不出去。
+        合成时会自动把照片摆正、按 A4 铺好，10 页大约 2~3MB —— 从"发不出去"变成"一个几 MB 的 PDF"。<br>
+        <b>对方要压缩包怎么办</b>：你把这两个 PDF 打成一个 zip 就行（或者干脆不打包，
+        直接发两个 PDF —— 除非对方明确要求 zip，两个 PDF 反而更省 HR 的事，不用解压）。
       </div>
       <div class="card" style="margin-top:16px;">
         <h2>遇到问题看这里</h2>
@@ -393,7 +461,7 @@
 <div id="toast"></div>
 
 <script>
-let JOBS = [], CONFIG = {}, TEMPLATE = {}, ATTS = [], EDIT_ID = null, pollTimer = null;
+let JOBS = [], CONFIG = {}, TEMPLATE = {}, ATTS = [], MERGE_FILES = [], EDIT_ID = null, pollTimer = null;
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -641,6 +709,11 @@ async function loadState() {
   $("#tplBody").value = TEMPLATE.body || "";
   $("#qToday").textContent = r.today_sent; $("#qLimit").textContent = r.daily_limit;
   renderAtt(r.attachments || []);
+  MERGE_FILES = r.merge_files || [];
+  renderMerge();
+  if (!$("#mergeOutName").value) {
+    $("#mergeOutName").value = (CONFIG.name ? CONFIG.name + "-证明材料" : "证明材料") + ".pdf";
+  }
   renderPreview();
 }
 async function saveConfig() {
@@ -687,6 +760,77 @@ async function delAtt(btn) {
   if (!confirm(`确定删除附件「${name}」？`)) return;
   const r = await api("/api/attachments/delete", { name });
   ATTS = r.attachments || []; renderAtt(ATTS); renderPreview();
+}
+
+/* ---------- 材料合并 ---------- */
+function fmtSize(n) {
+  return n >= 1024 * 1024 ? (n / 1024 / 1024).toFixed(1) + " MB" : (n / 1024).toFixed(0) + " KB";
+}
+function renderMerge() {
+  const list = MERGE_FILES || [];
+  $("#mergeList").innerHTML = list.length ? list.map((f, i) => `
+    <div class="mrow" data-id="${esc(f.id)}">
+      <span class="mseq">${i + 1}</span>
+      <div class="mmain">
+        <div class="mname">${esc(f.name)}</div>
+        <div class="mmeta${f.ok ? "" : " bad"}">${f.ok ? (f.kind === "pdf" ? "PDF" : "图片") + " · " + f.pages + " 页" : "⚠ 这个格式不认识，合成时会跳过"} · ${fmtSize(f.size)}</div>
+      </div>
+      <div class="mops">
+        <button class="mbtn" data-act="up" title="上移" ${i === 0 ? "disabled" : ""}>↑</button>
+        <button class="mbtn" data-act="down" title="下移" ${i === list.length - 1 ? "disabled" : ""}>↓</button>
+        <button class="mbtn del" data-act="del">删除</button>
+      </div>
+    </div>`).join("")
+    : `<div class="empty" style="padding:26px 0;">还没有文件。点「＋ 添加文件」，把学籍证明、成绩排名、证书这些加进来<br>（PDF 和手机拍的照片都行，混着加也没问题）</div>`;
+  const use = list.filter(f => f.ok);
+  const pages = use.reduce((n, f) => n + (f.pages || 0), 0);
+  $("#mergeSum").innerHTML = list.length
+    ? `合计 <b>${use.length}</b> 个文件 · <b>${pages}</b> 页${use.length !== list.length ? ` · 有 ${list.length - use.length} 个不支持的格式会被跳过` : ""}`
+    : "";
+}
+$("#mergeList").addEventListener("click", async e => {
+  const btn = e.target.closest("button[data-act]");
+  if (!btn || btn.disabled) return;
+  const id = btn.closest(".mrow").dataset.id;
+  const act = btn.dataset.act;
+  const r = act === "del"
+    ? await api("/api/merge/remove", { id })
+    : await api("/api/merge/move", { id, dir: act === "up" ? -1 : 1 });
+  if (!r.ok) return toast(r.error, false);
+  MERGE_FILES = r.files || []; renderMerge();
+});
+async function addMergeFiles() {
+  const files = $("#mergeInput").files;
+  if (!files.length) return toast("先选文件（可以一次选多个）", false);
+  let added = 0;
+  for (const f of files) {
+    const b64 = await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result.split(",")[1]); fr.readAsDataURL(f); });
+    const r = await api("/api/merge/add", { name: f.name, data: b64 });
+    if (!r.ok) { $("#mergeInput").value = ""; renderMerge(); return toast(`${f.name}：${r.error}`, false); }
+    MERGE_FILES = r.files || []; added++;
+  }
+  $("#mergeInput").value = "";
+  renderMerge();
+  toast(`已加入 ${added} 个文件，排好顺序再点合成`);
+}
+async function clearMerge() {
+  if (!(MERGE_FILES || []).length) return;
+  if (!confirm("清空待合并列表？（附件库里已经合成好的不受影响）")) return;
+  const r = await api("/api/merge/clear", {});
+  MERGE_FILES = r.files || []; renderMerge();
+  toast("列表已清空");
+}
+async function runMerge() {
+  if (!(MERGE_FILES || []).length) return toast("先把要合并的文件加进来", false);
+  const r = await api("/api/merge/run", { name: $("#mergeOutName").value });
+  if (!r.ok) return toast(r.error, false);
+  MERGE_FILES = r.files || []; renderMerge();
+  ATTS = r.attachments || ATTS; renderAtt(ATTS); renderPreview();
+  const mb = r.size / 1024 / 1024;
+  toast(`合成成功：${r.output}（${r.pages} 页，${mb.toFixed(1)} MB）`);
+  if (r.size > 15 * 1024 * 1024) {
+    setTimeout(() => toast(`注意：合成结果 ${mb.toFixed(1)} MB，超过单个附件 15MB 的建议值，最好把照片压小一点再合`, false), 2800);
+  }
 }
 
 /* ---------- send ---------- */

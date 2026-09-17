@@ -827,6 +827,24 @@ def norm_email(v):
 EMAIL_BAD_CHARS = ':",;<>[]()\\'
 
 
+# 这个软件走的是 QQ 邮箱的 SMTP 通道，地址写死在上面。别的邮箱配了也发不出去，
+# 但报出来的会是"授权码不正确"—— 一个完全指错方向的提示。所以先拦清楚。
+MAIL_DOMAINS = ("qq.com", "foxmail.com")
+
+
+def mail_host_problem(cfg):
+    """发件邮箱能不能用这个软件发。不能用返回一句人话，能用返回 ""。"""
+    e = norm_email((cfg or {}).get("email"))
+    if not e:
+        return ""
+    dom = e.rsplit("@", 1)[-1].lower()
+    if dom not in MAIL_DOMAINS:
+        return ("这个软件只能配 QQ 邮箱来发信（地址结尾是 @qq.com 或 @foxmail.com）。\n"
+                "现在填的是 %s —— 163、Gmail、公司邮箱都用不了，因为软件走的是 QQ 邮箱的发信通道。\n"
+                "换个 QQ 邮箱填上，授权码也要用那个 QQ 邮箱生成的。" % e)
+    return ""
+
+
 def email_problem(v):
     """检查收件邮箱能不能用，没问题返回 ""，有问题返回一句人话。
 
@@ -1823,6 +1841,10 @@ class Handler(BaseHTTPRequestHandler):
                     cfg = get_config()
                     if not cfg.get("email") or not cfg.get("auth_code"):
                         self._json({"ok": False, "error": "请先在「发送设置」中填写 QQ 邮箱和授权码"})
+                        return
+                    host_bad = mail_host_problem(cfg)
+                    if host_bad:
+                        self._json({"ok": False, "error": host_bad})
                         return
                     ids = body.get("ids", [])
                     jobs = get_jobs()

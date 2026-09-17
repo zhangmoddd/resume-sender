@@ -862,12 +862,33 @@ def email_problem(v):
     return ""
 
 
+def att_mode_of(job):
+    """这条投递目标走哪种附件方式。
+
+    all  = 跟着附件库走：库里有什么就全带上，以后新上传的也带
+    pick = 只发 atts 里点名的；名单为空 = 一个都不带（新建 / 新导入的默认）
+
+    老数据没有 att_mode 字段，按老规矩推：atts 里有名字 = pick，空的 = all，
+    所以升级这件事不会让已经存好的清单变样。
+    """
+    m = str((job or {}).get("att_mode") or "").strip()
+    if m in ("all", "pick"):
+        return m
+    return "pick" if norm_atts((job or {}).get("atts")) else "all"
+
+
 def resolve_attachments(job):
-    """按投递目标解析附件：atts 为空 -> 发全部附件；否则只发勾选的（按勾选顺序）。"""
-    chosen = [str(x) for x in ((job or {}).get("atts") or [])]
+    """按投递目标解析附件。
+
+    att_mode=all  -> 发附件库里全部
+    att_mode=pick -> 只发 atts 里点名的（按勾选顺序）；名单为空 = 一个都不发
+    """
     all_atts = list_attachments()
-    if not chosen:
+    if att_mode_of(job) == "all":
         return all_atts
+    chosen = [str(x) for x in norm_atts((job or {}).get("atts"))]
+    if not chosen:
+        return []
     keep = set(chosen)
     picked = [a for a in all_atts if a["name"] in keep]
     order = {n: i for i, n in enumerate(chosen)}
@@ -881,12 +902,15 @@ def attachment_problem(job):
     为什么非要拦：以前附件对不上时，邮件会"没带简历照样发出去"，状态还记成「已发送」，
     用户根本看不出来。现在宁可这一条不发、明确报错。
     """
-    chosen = [str(x) for x in ((job or {}).get("atts") or [])]
     have = {a["name"] for a in list_attachments()}
-    if not chosen:
+    if att_mode_of(job) == "all":
         if not have:
             return "附件库里一个文件都没有，请先到「发送设置」上传简历"
         return ""
+    chosen = norm_atts((job or {}).get("atts"))
+    if not chosen:
+        return ("这条一个附件都没勾，发出去会是一封不带简历的邮件。"
+                "点它的「编辑」勾上要发的文件，或者勾上「跟着附件库走」")
     missing = [n for n in chosen if n not in have]
     if missing:
         return "指定的附件在附件库里找不到：%s（被删掉或改过名了？）" % "、".join(missing[:3])
@@ -1186,7 +1210,7 @@ def _append_job(jobs, existing, company, position, email, note, tags,
         "company": company, "position": position, "email": email, "note": note,
         "tags": list(tags or []),
         "template_id": str(template_id or ""),
-        "subject_override": "", "body_override": "", "atts": [],
+        "subject_override": "", "body_override": "", "atts": [], "att_mode": "pick",
         "progress": progress if progress in ("未回音", "笔试", "面试", "Offer", "挂了", "我放弃") else "未回音",
         "event_date": event_date,
         "mynote": mynote,
@@ -1624,7 +1648,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not job:
                     job = jobs[0] if jobs else {"company": "示例科技", "position": "后端开发",
                                                 "email": "hr@example.com", "note": "",
-                                                "subject_override": "", "body_override": "", "atts": []}
+                                                "subject_override": "", "body_override": "",
+                                                "atts": [], "att_mode": "pick"}
                 cfg = get_config()
                 tpls = get_templates()
                 tpl = template_for_job(job, tpls)
@@ -1638,7 +1663,7 @@ class Handler(BaseHTTPRequestHandler):
                     "body": render(job.get("body_override") or tpl.get("body", ""), job, cfg),
                     "template_name": tpl.get("name", ""),
                     "attachments": atts,
-                    "custom": bool(job.get("subject_override") or job.get("body_override") or job.get("atts")),
+                    "custom": bool(job.get("subject_override") or job.get("body_override") or norm_atts(job.get("atts"))),
                     "job": job,
                 })
             elif path == "/api/jobs/add":
@@ -1653,6 +1678,8 @@ class Handler(BaseHTTPRequestHandler):
                     "subject_override": str(body.get("subject_override", "")).strip(),
                     "body_override": str(body.get("body_override", "")),
                     "atts": norm_atts(body.get("atts")),
+                    # 只有前端明确说了 all 才跟着附件库走；其余（含没传这个字段的调用）= pick
+                    "att_mode": "all" if str(body.get("att_mode") or "").strip() == "all" else "pick",
                     "progress": str(body.get("progress", "")).strip() or "未回音",
                     "event_date": str(body.get("event_date", "")).strip(),
                     "mynote": str(body.get("mynote", "")),
@@ -1694,6 +1721,9 @@ class Handler(BaseHTTPRequestHandler):
                     if "progress" in body:
                         v = str(body["progress"]).strip()
                         j["progress"] = v if v in ("未回音", "笔试", "面试", "Offer", "挂了", "我放弃") else "未回音"
+                    if "att_mode" in body:
+                        m = str(body.get("att_mode") or "").strip()
+                        j["att_mode"] = m if m in ("all", "pick") else att_mode_of(j)
                     if "atts" in body:
                         j["atts"] = norm_atts(body.get("atts"))
                     if "tags" in body:

@@ -36,6 +36,9 @@ INDEX_HTML = os.path.join(BASE, "index.html")
 
 ATT_NOTE_FILE = "attachment_notes.json"   # {文件名: 备注文字}，备注只存在本机，不会随邮件发出
 SHEET_FILE = "sheet_draft.json"           # 在线填表的草稿，关掉软件再打开还在
+TRASH_FILE = "trash_jobs.json"            # 刚删掉的清单条目先放这儿，用户点「撤销」能原样放回去
+TRASH_ATT_FILE = "trash_attachment.json"  # 刚删掉的附件记一笔（文件挪进 attachments/_deleted/）
+DELETED_DIR = os.path.join(ATTACH_DIR, "_deleted")   # 删掉的附件不真删，先挪这儿存着
 
 # 模板库：可以同时存好几套话术（一套投 AI 岗、一套投专业对口岗…）。
 # 每条投递目标在「投递定位」那一列挑一套；不挑就跟随这里标记为默认的那套。
@@ -1778,12 +1781,46 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": True, "tags_dropped": tags_dropped})
             elif path == "/api/jobs/delete":
                 ids = {str(x) for x in (body.get("ids") or [])}
+                removed = []
 
                 def _del(jobs):
+                    # 删之前先记下"删了哪几条、原来在第几位"：
+                    # 用户手滑删错了可以点撤销，按原来的位置原样放回去
+                    # （状态、发送时间、标签全都保持原样，不会变成"待发"再投一遍）
+                    for i, j in enumerate(jobs):
+                        if str(j.get("id")) in ids:
+                            removed.append({"index": i, "job": j})
                     jobs[:] = [j for j in jobs if str(j.get("id")) not in ids]
 
                 mutate_jobs(_del)
-                self._json({"ok": True})
+                save_json(TRASH_FILE, {
+                    "at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "items": removed,
+                })
+                self._json({"ok": True, "removed": len(removed)})
+            elif path == "/api/jobs/undo-delete":
+                # 撤销上一次删除
+                trash = load_json(TRASH_FILE, {})
+                items = [x for x in (trash.get("items") or []) if isinstance(x, dict)]
+                if not items:
+                    self._json({"ok": False, "error": "没有可以撤销的删除了"})
+                    return
+
+                def _undo(jobs):
+                    have = {str(j.get("id")) for j in jobs}
+                    for it in sorted(items, key=lambda x: int(x.get("index") or 0)):
+                        job = it.get("job")
+                        if not isinstance(job, dict) or not job:
+                            continue
+                        if str(job.get("id")) in have:
+                            continue                     # 已经在了就别插第二遍
+                        at = max(0, min(int(it.get("index") or 0), len(jobs)))
+                        jobs.insert(at, job)
+                        have.add(str(job.get("id")))
+
+                mutate_jobs(_undo)
+                save_json(TRASH_FILE, {"at": "", "items": []})   # 用过就清空，免得反复"复活"
+                self._json({"ok": True, "count": len(items)})
             elif path == "/api/jobs/reset":
                 def _reset_all(jobs):
                     for j in jobs:
@@ -1858,10 +1895,45 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/attachments/delete":
                 name = os.path.basename(str(body.get("name", "")))
                 p = os.path.join(ATTACH_DIR, name)
-                if os.path.exists(p):
-                    os.remove(p)
+                if name and os.path.isfile(p):
+                    # 不真删，先挪到 attachments/_deleted/ 存着 ——
+                    # 附件是用户自己整理的文件，手滑删掉还能点「撤销」原样拿回来。
+                    # （这个子目录不会被当成附件列出来：只认文件，不认目录）
+                    os.makedirs(DELETED_DIR, exist_ok=True)
+                    keep = os.path.join(DELETED_DIR, name)
+                    base_name, ext = os.path.splitext(name)
+                    i = 1
+                    while os.path.exists(keep):
+                        keep = os.path.join(DELETED_DIR, "%s(%d)%s" % (base_name, i, ext))
+                        i += 1
+                    shutil.move(p, keep)
+                    save_json(TRASH_ATT_FILE, {
+                        "at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "name": name,
+                        "stored": os.path.basename(keep),
+                        "note": get_att_notes().get(name, ""),
+                    })
                 drop_att_note(name)
                 self._json({"ok": True, "attachments": list_attachments()})
+            elif path == "/api/attachments/undo-delete":
+                info = load_json(TRASH_ATT_FILE, {})
+                name = os.path.basename(str(info.get("name") or ""))
+                stored = os.path.join(DELETED_DIR, os.path.basename(str(info.get("stored") or "")))
+                if not name or not os.path.isfile(stored):
+                    self._json({"ok": False, "error": "没有可以撤销的删除了"})
+                    return
+                target = os.path.join(ATTACH_DIR, name)
+                base_name, ext = os.path.splitext(name)
+                i = 1
+                while os.path.exists(target):
+                    target = os.path.join(ATTACH_DIR, "%s(%d)%s" % (base_name, i, ext))
+                    i += 1
+                shutil.move(stored, target)
+                restored = os.path.basename(target)
+                if str(info.get("note") or ""):
+                    set_att_note(restored, str(info["note"]))
+                save_json(TRASH_ATT_FILE, {})       # 用过就清掉，免得反复"复活"出好几份
+                self._json({"ok": True, "name": restored, "attachments": list_attachments()})
             elif path == "/api/attachments/note":
                 name = os.path.basename(str(body.get("name", "")))
                 if name and os.path.isfile(os.path.join(ATTACH_DIR, name)):

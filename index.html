@@ -150,6 +150,14 @@
   .modal-body { flex: 1 1 auto; overflow-y: auto; padding: 16px 22px 4px; }
   .modal-foot { flex: none; display: flex; justify-content: flex-end; gap: 8px; padding: 12px 22px 16px; border-top: 1px solid #f0f1f3; background: #fff; }
   #toast { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); background: #1f2937; color: #fff; padding: 10px 20px; border-radius: 10px; font-size: 13px; display: none; z-index: 99; max-width: 78vw; line-height: 1.7; }
+  /* 撤销条：跟提示条长得一样，只是多了个"撤销"按钮，固定在右下角不挡提示 */
+  #undoBar { display: none; position: fixed; right: 24px; bottom: 28px; z-index: 100; background: #1f2937; color: #fff; padding: 9px 10px 9px 16px; border-radius: 10px; font-size: 13px; align-items: center; gap: 12px; box-shadow: 0 6px 18px rgba(0,0,0,.22); max-width: 70vw; }
+  #undoBar.show { display: flex; }
+  #undoBar button { border: 0; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  #undoBar .undo-go { background: #e6f1fb; color: #0c447c; font-weight: 600; padding: 5px 12px; }
+  #undoBar .undo-go:hover { background: #cfe3f7; }
+  #undoBar .undo-x { background: transparent; color: #9ca3af; font-size: 17px; line-height: 1; padding: 2px 6px; }
+  #undoBar .undo-x:hover { color: #fff; }
   /* 和后台断线的横幅：一直挂在那儿，直到重新连上 */
   #offlineBar { display: none; position: fixed; left: 0; right: 0; top: 0; z-index: 999;
     background: #a32d2d; color: #fff; padding: 10px 16px; font-size: 13px; line-height: 1.8; text-align: center; }
@@ -183,6 +191,9 @@
                 background: #fff; max-width: 100px; }
   .tpl-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 14px;
              background: #f4f8fd; border: 1px solid #cfe3f7; border-radius: 10px; padding: 8px 12px; }
+  /* 模板页分区：一条虚线隔开，每块顶上一个蓝标题 —— 文字多了也能一眼看出哪块是哪块 */
+  .tpl-sec { border-top: 1px dashed #e5e7eb; margin-top: 14px; padding-top: 12px; }
+  .tpl-sec .sec-t { display: block; font-size: 13px; color: #0c447c; margin-bottom: 4px; }
   .tpl-bar .tb-label { font-size: 12px; color: #6b7280; white-space: nowrap; }
   .tpl-bar select { border: 1px solid #d1d5db; border-radius: 8px; padding: 5px 8px; font-size: 13px;
                     font-family: inherit; background: #fff; max-width: 240px; }
@@ -420,36 +431,44 @@
         </div>
         <div class="field">
           <label>邮件主题</label>
-          <input id="tplSubject" oninput="markTplDirty()" placeholder="例如：应聘【{岗位}】- {姓名}（{学校}）">
+          <input id="tplSubject" oninput="markTplDirty()" onfocus="LAST_TPL_FIELD='subject'" placeholder="例如：应聘【{岗位}】- {姓名}（{学校}）">
         </div>
         <div class="field">
           <label>邮件正文</label>
-          <textarea id="tplBody" oninput="markTplDirty()" placeholder="尊敬的HR：&#10;&#10;您好！我是{学校}{姓名}，…"></textarea>
+          <textarea id="tplBody" oninput="markTplDirty()" onfocus="LAST_TPL_FIELD='body'" placeholder="尊敬的HR：&#10;&#10;您好！我是{学校}{姓名}，…"></textarea>
         </div>
         <div class="hint" style="margin:-4px 0 10px;">💡 框的右下角有两条小斜杠，按住它往下拖，框就变高（写长正文更舒服）；往上拖能缩回去。</div>
-        <div class="field">
-          <label>这套模板带哪些附件 <span class="hint">（选填。挑了几个之后，清单里选这套「投递定位」的条目，附件会跟着换成这几个）</span></label>
+
+        <div class="tpl-sec">
+          <b class="sec-t">可用的变量</b>
+          <span class="hint">点一下插到光标处 —— 光标在正文就插正文、在主题就插主题；发送时自动换成每家公司的真实内容</span>
+          <div class="chips" onmousedown="event.preventDefault()">
+            <span class="chip" onclick="insertVar('{公司}')">{公司}</span>
+            <span class="chip" onclick="insertVar('{岗位}')">{岗位}</span>
+            <span class="chip" onclick="insertVar('{姓名}')">{姓名}</span>
+            <span class="chip" onclick="insertVar('{学校}')">{学校}</span>
+            <span class="chip" onclick="insertVar('{专业}')">{专业}</span>
+            <span class="chip" onclick="insertVar('{备注}')">{备注}</span>
+          </div>
+        </div>
+
+        <div class="tpl-sec">
+          <b class="sec-t">这套带哪些附件</b>
+          <span class="hint">选填。清单里把这套挑成「投递定位」的条目，附件会跟着换成这几个</span>
           <div class="att-check" id="tplAttList"></div>
           <div class="hint" id="tplAttHint" style="margin-top:6px; line-height:1.8;"></div>
         </div>
-        <div class="hint">可用的变量（点一下插入到光标处，发送时自动替换为每家公司的真实内容）：</div>
-        <div class="chips">
-          <span class="chip" onclick="insertVar('{公司}')">{公司}</span>
-          <span class="chip" onclick="insertVar('{岗位}')">{岗位}</span>
-          <span class="chip" onclick="insertVar('{姓名}')">{姓名}</span>
-          <span class="chip" onclick="insertVar('{学校}')">{学校}</span>
-          <span class="chip" onclick="insertVar('{专业}')">{专业}</span>
-          <span class="chip" onclick="insertVar('{备注}')">{备注}</span>
+
+        <div class="tpl-sec">
+          <b class="sec-t">怎么用</b>
+          <div class="hint" style="line-height:1.9;">上面下拉里选哪套，就在编辑哪套。写完点「保存这套」；切模板、切页签、点投递，也都会自动存一下。<br>
+            个别公司要求不一样？不用改这里 —— 到「投递清单」点那家公司的「编辑」，可以单独定制它的主题、正文和附件。</div>
         </div>
-        <div class="hint">上面下拉里选哪套，就在编辑哪套。<b>新建</b>一套写别的话术（比如专投 AI 岗的），写完在「投递清单」的<b>投递定位</b>那一列挑给它。<br>
-          每套还能<b>关联附件</b>：比如「专业对口」这套挂简历+通用证明材料，清单里切成专业对口的条目，附件自动换成这两个。<br>
-          个别公司要求不一样？不用改这里——在「投递清单」里点那家公司的「编辑」，可单独定制它的主题、正文和附件。</div>
-        <div style="display:flex; gap:10px; margin-top:12px; align-items:center; flex-wrap:wrap;">
+
+        <div style="display:flex; gap:10px; margin-top:14px; align-items:center; flex-wrap:wrap;">
           <button class="btn primary" onclick="saveTemplate()">保存这套</button>
           <span id="tplDirty" style="display:none; color:#a32d2d; font-size:12px; font-weight:600;">● 有改动没保存（不改的话，发出去还是旧内容）</span>
-          <span class="hint">切到别的模板、切到别的标签页、或者直接点投递，都会自动存一下。</span>
         </div>
-        <div class="hint" style="margin-top:8px;">每封邮件都会自动挂上「发送设置」里上传的简历附件。</div>
       </div>
       <div class="card">
         <h2>整封邮件预览 <span class="hint" style="font-weight:400;">（HR 收到的就是这个样子，选一条清单数据模拟）</span></h2>
@@ -836,6 +855,7 @@
         <input type="file" id="sheetFile" accept=".xlsx" style="display:none;">
         <button class="btn" onclick="document.getElementById('sheetFile').click()">📂 打开 Excel 文件</button>
         <button class="btn" onclick="sheetAddRows()">＋ 加 20 行</button>
+        <button class="btn" id="sheetUndoBtn" onclick="sheetUndo()" title="撤回上一步改动（Ctrl+Z 也行）">↶ 撤销</button>
         <button class="btn danger" onclick="sheetClear()">清空表格</button>
       </div>
       <div class="sheet-wrap" id="sheetWrap"></div>
@@ -856,11 +876,19 @@
 
 <input type="file" id="importInput" accept=".xlsx" style="display:none;">
 <div id="toast"></div>
+<!-- 删错了能反悔：删完在右下角待 15 秒，点一下就原样放回去 -->
+<div id="undoBar">
+  <span id="undoText"></span>
+  <button class="undo-go" onclick="undoDelete()">↶ 撤销</button>
+  <button class="undo-x" onclick="hideUndo()" title="算了，不撤销">×</button>
+</div>
 
 <script>
 let JOBS = [], CONFIG = {}, ATTS = [], MERGE_FILES = [], EDIT_ID = null, pollTimer = null;
 // 模板库：list 里存好几套话术，default_id 标着哪套是「默认」
 let TPLS = { list: [], default_id: "" }, TPL_CUR = "";
+// 变量按钮插到哪个框：跟着"最后点过的那个"走（默认正文，写正文才是主要活儿）
+let LAST_TPL_FIELD = "body";
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -1450,18 +1478,51 @@ async function saveEdit() {
   if (noAtt) toast("已保存（这条没带附件，发送前记得勾上）" + droppedNote(dropped), false);
   else toast("已保存" + droppedNote(dropped));
 }
+/* ---------- 删错了能反悔 ---------- */
+/* 删掉的条目后端会先存在 data/trash_jobs.json 里（连原来的位置一起记着），
+   这里只是给用户一个"点一下放回去"的入口。过了 15 秒条儿会自己消失，
+   数据还在文件里，重开软件也不会自动清掉。 */
+let undoHideTimer = null, undoKind = "jobs";   // undoKind：这一下撤的是清单条目还是附件
+function showUndo(text, kind) {
+  undoKind = kind || "jobs";
+  $("#undoText").textContent = text;
+  $("#undoBar").classList.add("show");
+  clearTimeout(undoHideTimer);
+  undoHideTimer = setTimeout(hideUndo, 15000);
+}
+function hideUndo() {
+  clearTimeout(undoHideTimer);
+  $("#undoBar").classList.remove("show");
+}
+async function undoDelete() {
+  hideUndo();
+  if (undoKind === "att") {
+    const r = await api("/api/attachments/undo-delete", {});
+    if (!r || r.ok === false) return toast((r && r.error) || "没撤销成功，刷新看看", false);
+    ATTS = r.attachments || ATTS;
+    renderAtt(ATTS); renderTplAtts(); renderPreview();
+    toast(`「${r.name}」已放回附件库`);
+    return;
+  }
+  const r = await api("/api/jobs/undo-delete", {});
+  if (!r || r.ok === false) return toast((r && r.error) || "没撤销成功，刷新看看", false);
+  await loadJobs();
+  toast(`已放回来 ${r.count} 条（状态、发送时间都还是原样）`);
+}
 async function deleteOne(id) {
-  if (!confirm("确定删除这一条投递目标？")) return;
+  if (!confirm("确定删除这一条投递目标？\n\n（删错了不要紧：删完 15 秒内右下角有个「撤销」，点一下就放回来）")) return;
   const r = await api("/api/jobs/delete", { ids: [id] });
   if (!r || r.ok === false) return toast((r && r.error) || "删除失败", false);
   loadJobs();
+  showUndo("已删除 1 条投递目标");
 }
 async function deleteSelected() {
   const ids = selectedIds(); if (!ids.length) return toast("先勾选要删除的目标", false);
-  if (!confirm("确定删除选中的 " + ids.length + " 条？")) return;
+  if (!confirm(`确定删除选中的 ${ids.length} 条？\n\n（删错了不要紧：删完 15 秒内右下角有个「撤销」，点一下就放回来）`)) return;
   const r = await api("/api/jobs/delete", { ids });
   if (!r || r.ok === false) return toast((r && r.error) || "删除失败", false);
   loadJobs();
+  showUndo(`已删除 ${ids.length} 条投递目标`);
 }
 async function resetFailed() {
   const r = await api("/api/jobs/reset", {});
@@ -1712,13 +1773,16 @@ function renderEditTpl(job) {
       `<option value="${t.id}"${cur === t.id ? " selected" : ""}>${esc(t.name)}${mark(t)}</option>`).join("");
 }
 function insertVar(v) {
-  const el = document.activeElement === $("#tplBody") ? $("#tplBody") : $("#tplSubject");
+  // 插到「你最后点过的那 个框」：以前是看"当下焦点在哪"，
+  // 可鼠标一按变量按钮，焦点就从正文跑掉了，于是永远插进主题里 —— 这就是那个 bug。
+  // 现在两头都堵上：chips 上拦住 mousedown（正文不失焦），再加个"最后点过哪个框"兜底。
+  const el = LAST_TPL_FIELD === "subject" ? $("#tplSubject") : $("#tplBody");
   // 注意：光标在开头时 selectionStart 是 0，用 || 会把它当假值、插到末尾去。
   const ss = el.selectionStart;
   const pos = (typeof ss === "number" && ss >= 0) ? ss : el.value.length;
   el.value = el.value.slice(0, pos) + v + el.value.slice(pos);
   el.focus(); el.selectionStart = el.selectionEnd = pos + v.length;
-  renderPreview();
+  markTplDirty();
 }
 function refreshPreviewSelect() {
   const sel = $("#previewJob");
@@ -1902,9 +1966,10 @@ async function uploadAtt() {
 }
 async function delAtt(btn) {
   const name = btn.dataset.name;
-  if (!confirm(`确定删除附件「${name}」？`)) return;
+  if (!confirm(`确定删除附件「${name}」？\n\n（删错了不要紧：删完 15 秒内右下角有个「撤销」，点一下就放回附件库）`)) return;
   const r = await api("/api/attachments/delete", { name });
   ATTS = r.attachments || []; renderAtt(ATTS); renderTplAtts(); renderPreview();
+  showUndo(`已删除附件「${name}」`, "att");
 }
 
 /* ---------- 附件在线预览 ---------- */
@@ -2204,9 +2269,37 @@ const SHEET_COLS = 4;
 const SHEET_COL_CN = ["公司", "岗位", "收件邮箱", "备注"];
 const SHEET_COL_LETTER = ["A", "B", "C", "D"];
 let SHEET = [], SHEET_ROWS = 40, SEL = null, sheetDragging = false, saveTimer = null, lastSelKey = "";
+/* 表格的"反悔"记录：每次要整块动内容之前先存一份当时的表，撤销就倒回去。
+   最多留 25 步，够用，也不占内存。 */
+let SHEET_UNDO = [], SHEET_EDIT_KEY = "";
+const SHEET_UNDO_MAX = 25;
 
 function blankSheet(n) { return Array.from({ length: n }, () => Array(SHEET_COLS).fill("")); }
 function colName(c) { return SHEET_COL_LETTER[c] || ("第" + (c + 1) + "列"); }
+function pushSheetUndo(label) {
+  SHEET_UNDO.push({ label: label || "改动", rows: SHEET.map(r => r.slice()), rowsN: SHEET_ROWS });
+  if (SHEET_UNDO.length > SHEET_UNDO_MAX) SHEET_UNDO.shift();
+  updateSheetUndoBtn();
+}
+function updateSheetUndoBtn() {
+  const b = $("#sheetUndoBtn");
+  if (!b) return;
+  b.disabled = !SHEET_UNDO.length;
+  b.style.opacity = SHEET_UNDO.length ? "" : ".5";
+  b.textContent = SHEET_UNDO.length ? `↶ 撤销（${SHEET_UNDO.length}）` : "↶ 撤销";
+}
+function sheetUndo() {
+  const st = SHEET_UNDO.pop();
+  if (!st) return toast("没有可以撤销的改动了", false);
+  SHEET_ROWS = st.rowsN;
+  SHEET = st.rows.map(r => r.slice());
+  while (SHEET.length < SHEET_ROWS) SHEET.push(Array(SHEET_COLS).fill(""));
+  SHEET_EDIT_KEY = "";
+  renderSheet();
+  queueSheetSave();
+  updateSheetUndoBtn();
+  toast("已撤销：" + st.label);
+}
 
 async function openSheet() {
   let loaded = null;
@@ -2225,7 +2318,9 @@ async function openSheet() {
     (line || []).forEach((v, c) => { if (c < SHEET_COLS) SHEET[r][c] = v == null ? "" : String(v); });
   });
   SEL = null; lastSelKey = "";
+  SHEET_UNDO = []; SHEET_EDIT_KEY = "";     // 换一张表，之前的撤销记录就不作数了
   renderSheet();
+  updateSheetUndoBtn();
   if (rows.length && loaded && loaded.updated_at) {
     toast("已载入上次没导完的内容（" + loaded.updated_at + " 存的）");
   }
@@ -2353,12 +2448,14 @@ function sheetAddRows() {
   renderSheet();
 }
 function sheetClear() {
-  if (!confirm("清空表格里的内容？（已经导入到清单的不受影响）")) return;
+  if (!SHEET.some(r => r.some(v => v && String(v).trim()))) return toast("表格本来就是空的", false);
+  if (!confirm("清空表格里的内容？（已经导入到清单的不受影响）\n\n清错了不要紧：点「↶ 撤销」就能倒回来")) return;
+  pushSheetUndo("清空表格");
   SHEET = blankSheet(SHEET_ROWS);
   SEL = null;
   renderSheet();
   sheetSaveNow();
-  toast("表格已清空");
+  toast("表格已清空（要反悔就点「↶ 撤销」）");
 }
 async function importSelection() {
   const s = normSel();
@@ -2486,6 +2583,8 @@ function sheetPaste(text) {
   if (lines.length && lines[lines.length - 1] === "") lines.pop();
   const grid = lines.map(l => l.split("\t"));
   const cols = grid.reduce((m, l) => Math.max(m, l.length), 0);
+  pushSheetUndo("粘贴覆盖");
+  SHEET_EDIT_KEY = "";
   const res = fillCells(at.r, at.c, grid);
   toast(res.dropped
     ? `已粘进 ${res.rows} 行（超出的列丢掉了，只认前 4 列）`
@@ -2494,6 +2593,7 @@ function sheetPaste(text) {
 function sheetClearSel() {
   const s = normSel();
   if (!s) return 0;
+  pushSheetUndo("清空 " + ((s.r2 - s.r1 + 1) * (s.c2 - s.c1 + 1)) + " 个格子");
   let n = 0;
   for (let r = s.r1; r <= s.r2; r++) {
     for (let c = s.c1; c <= s.c2; c++) {
@@ -2505,6 +2605,7 @@ function sheetClearSel() {
   }
   queueSheetSave();
   updateSheetFoot();
+  if (!n) { SHEET_UNDO.pop(); updateSheetUndoBtn(); }   // 本来就没内容，不留这一步撤销记录
   return n;
 }
 /* 不是编辑态时，方向键挪选中的格子（Excel 里也是这么走的） */
@@ -2550,12 +2651,19 @@ document.addEventListener("paste", e => {
 });
 /* 键盘：在格子里打字时不抢；不在编辑态时，方向键挪格子、Delete 清空、回车进去改 */
 document.addEventListener("keydown", e => {
-  if (!sheetOpen() || !SEL) return;
+  if (!sheetOpen()) return;
   const a = document.activeElement;
   const inCell = !!(a && a.classList && a.classList.contains("sg-input"));
   const otherEditable = !inCell && a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" ||
                                         a.tagName === "SELECT" || a.isContentEditable);
   if (otherEditable) return;                 // 焦点在标签框之类的地方，别抢键盘
+  // Ctrl+Z 撤回表格里的改动（正在格子里打字时留给浏览器自己撤销这格的字）
+  if (!inCell && (e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) {
+    e.preventDefault();
+    sheetUndo();
+    return;
+  }
+  if (!SEL) return;
   if (inCell) {
     if (e.key === "Escape") {
       // 正在格子里改字时按 Esc = 退出编辑态（别把整个填表窗口关了 ——
@@ -2583,6 +2691,9 @@ document.addEventListener("keydown", e => {
 $("#sheetWrap").addEventListener("input", e => {
   const inp = e.target.closest("input.sg-input");
   if (!inp) return;
+  // 同一个格子里连着打字只记一步 —— 撤销就是"回到开始改这格之前"
+  const key = inp.dataset.r + "," + inp.dataset.c;
+  if (key !== SHEET_EDIT_KEY) { pushSheetUndo("改动 " + colName(Number(inp.dataset.c)) + (Number(inp.dataset.r) + 1)); SHEET_EDIT_KEY = key; }
   SHEET[Number(inp.dataset.r)][Number(inp.dataset.c)] = inp.value;
   updateSheetFoot();
   queueSheetSave();
@@ -2599,6 +2710,7 @@ $("#sheetFile").onchange = async e => {
   const data = (r.rows || []).map(line => line.slice(0, SHEET_COLS));
   while (data.length && !data[data.length - 1].some(v => v && String(v).trim())) data.pop();
   if (!data.length) return toast("这个文件里没读到内容", false);
+  pushSheetUndo("用 Excel 覆盖表格");
   SHEET_ROWS = Math.min(400, Math.max(40, data.length + 10));
   SHEET = blankSheet(SHEET_ROWS);
   const res = fillCells(0, 0, data);

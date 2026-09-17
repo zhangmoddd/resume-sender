@@ -51,6 +51,8 @@
   .field { margin-bottom: 12px; }
   .field label { display: block; font-size: 13px; color: #374151; margin-bottom: 5px; }
   .field input, .field textarea, .field select { width: 100%; border: 1px solid #d1d5db; border-radius: 8px; padding: 8px 10px; font-size: 13px; font-family: inherit; }
+  /* 勾选框/单选框不能跟着 width:100% 拉成整行宽，否则会把旁边的说明文字挤成竖排 */
+  .field input[type=checkbox], .field input[type=radio] { width: auto; height: auto; padding: 0; border: none; border-radius: 0; }
   .field input:focus, .field textarea:focus { outline: none; border-color: #185fa5; }
   .field textarea { height: 300px; resize: vertical; line-height: 1.7; }
   .chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }

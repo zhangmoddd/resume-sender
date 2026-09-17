@@ -289,6 +289,10 @@
 </nav>
 
 <main>
+  <!-- 数据文件读坏时的提醒（正常情况下是隐藏的） -->
+  <div class="card" id="dataWarn"
+       style="display:none; background:#fcebeb; border-color:#f7c1c1; color:#a32d2d; line-height:1.9; font-size:13px;"></div>
+
   <!-- ============ 投递清单 ============ -->
   <section id="tab-jobs" class="tabpane active">
     <div class="card">
@@ -333,7 +337,7 @@
             <th style="width:104px;">标签</th>
             <th style="width:88px;">我的进展</th>
             <th style="width:92px;" title="这一条用哪套话术。写「默认」= 跟随「邮件模板」页里标着 ★ 的那套">投递定位</th>
-            <th style="width:68px;">定制</th>
+            <th style="width:86px;" title="这一条会带哪几个附件。点一下能看具体是哪几个文件">附件</th>
             <th style="width:76px;">状态</th>
             <th style="width:96px;">发送时间</th>
             <th style="width:74px;">操作</th>
@@ -403,11 +407,11 @@
         </div>
         <div class="field">
           <label>邮件主题</label>
-          <input id="tplSubject" oninput="renderPreview()" placeholder="例如：应聘【{岗位}】- {姓名}（{学校}）">
+          <input id="tplSubject" oninput="markTplDirty()" placeholder="例如：应聘【{岗位}】- {姓名}（{学校}）">
         </div>
         <div class="field">
           <label>邮件正文</label>
-          <textarea id="tplBody" oninput="renderPreview()" placeholder="尊敬的HR：&#10;&#10;您好！我是{学校}{姓名}，…"></textarea>
+          <textarea id="tplBody" oninput="markTplDirty()" placeholder="尊敬的HR：&#10;&#10;您好！我是{学校}{姓名}，…"></textarea>
         </div>
         <div class="hint" style="margin:-4px 0 10px;">💡 框的右下角有两条小斜杠，按住它往下拖，框就变高（写长正文更舒服）；往上拖能缩回去。</div>
         <div class="hint">可用的变量（点一下插入到光标处，发送时自动替换为每家公司的真实内容）：</div>
@@ -423,7 +427,8 @@
           个别公司要求不一样？不用改这里——在「投递清单」里点那家公司的「编辑」，可单独定制它的主题、正文和附件。</div>
         <div style="display:flex; gap:10px; margin-top:12px; align-items:center; flex-wrap:wrap;">
           <button class="btn primary" onclick="saveTemplate()">保存这套</button>
-          <span class="hint">切到别的模板时会自动把改动存一下，不会丢。</span>
+          <span id="tplDirty" style="display:none; color:#a32d2d; font-size:12px; font-weight:600;">● 有改动没保存（不改的话，发出去还是旧内容）</span>
+          <span class="hint">切到别的模板、切到别的标签页、或者直接点投递，都会自动存一下。</span>
         </div>
         <div class="hint" style="margin-top:8px;">每封邮件都会自动挂上「发送设置」里上传的简历附件。</div>
       </div>
@@ -461,9 +466,14 @@
         </div>
         <div class="field"><label>我的专业（{专业}，部分公司命名格式会用到）</label><input id="cfgMajor" placeholder="例如：计算机科学与技术"></div>
         <div class="grid" style="grid-template-columns:1fr 1fr; gap:10px;">
-          <div class="field"><label>每封间隔（秒，建议 ≥30）</label><input id="cfgInterval" type="number" min="5" value="40"></div>
-          <div class="field"><label>每日发送上限（封）</label><input id="cfgLimit" type="number" min="1" value="50"></div>
+          <div class="field"><label>每封间隔（秒）</label>
+            <input id="cfgInterval" type="number" min="20" value="40" oninput="checkSendRate()">
+          </div>
+          <div class="field"><label>每日发送上限（封）</label>
+            <input id="cfgLimit" type="number" min="1" value="50" oninput="checkSendRate()">
+          </div>
         </div>
+        <div class="hint" id="rateTip" style="margin:-6px 0 12px; line-height:1.8;"></div>
         <button class="btn primary" onclick="saveConfig()">保存设置</button>
       </div>
       <div class="card">
@@ -627,10 +637,18 @@
           <b style="color:#374151">授权码忘了 / 当时没保存？</b> 回到邮箱设置页，把原来的开关"关闭"再"开启"，会生成新授权码，填新的即可。<br>
           <b style="color:#374151">一批全部发送失败？</b> 邮箱可能临时限流了。等 1~2 小时，在清单里点「把失败/已发送重置为待发」，再投一次失败的。<br>
           <b style="color:#374151">HR 的回复去哪看？</b> 你的 QQ 邮箱收件箱（也翻翻垃圾箱），建议每天看一次。<br>
-          <b style="color:#374151">会被封号吗？</b> 默认 40 秒一封、每天最多 50 封，远低于邮箱的风险线；不要自己把间隔改到 10 秒以下。<br>
+          <b style="color:#374151">会被封号吗？发快了到底会怎样？</b> 默认 40 秒一封、每天最多 50 封 —— 这个数是刻意压到很低的，别改快。
+          邮箱判断垃圾邮件<b>只看行为、不看内容</b>：一个账号、短时间内、发给一堆互不相识的人、内容还差不多 —— 投简历和打广告在它眼里长得一模一样。
+          发太快的后果：轻的是之后全部报「登录失败」，等 1~2 小时；重的是授权码当场作废（有人一连发 9 封就中招），要重新生成、甚至等一天；最重是 SMTP 服务被停用。
+          <b>还有一笔更常见的隐形损失</b>：收件人是 163、企业邮箱的那些，很可能直接被丢进垃圾箱或拒收 —— 你这边显示「发送成功」，HR 那边压根没看见。
+          正确做法是<b>分几天投</b>，而不是把间隔改小。间隔最少只能填 20 秒（填更小会自动改回 20），30 秒以上才稳，一天别超过 100 封。<br>
           <b style="color:#374151">正文能加粗、改颜色吗？</b> 软件发的是纯文本，求职邮件这样最稳妥：任何设备上显示一致、最不像广告邮件，HR 看到的就是你打的字。<br>
           <b style="color:#374151">QQ 邮箱的「发信设置」要改吗？签名会带上吗？</b> 都不用动。软件直接走邮箱的发送通道，不经过网页写信界面；网页签名也不会自动附加，落款写在模板正文里就行。<br>
-          <b style="color:#374151">发送时注意什么？</b> 别关闭软件页面和启动时的黑色窗口；发送过程中可以去干别的，发完它会自动停。
+          <b style="color:#374151">发送时注意什么？</b> 别关闭软件页面和启动时的黑色窗口；发送过程中可以去干别的，发完它会自动停。<br>
+          <b style="color:#374151">发送时我还能改清单吗？</b> 能。改进展、写备注、打标签、删条目、加新公司都没问题，不会被后台覆盖，删掉的也不会再发出去。<br>
+          <b style="color:#374151">点「开始投递」却说附件有问题？</b> 说明有几家公司勾的附件被删了或改过名（重新上传同名文件会变成 <b>xxx(1).pdf</b>，名字就对不上了）。软件会先拦下来 —— 宁可不发，也不发一封没带简历的邮件。到「发送设置」看附件库，或点那家公司的「编辑」重新勾选。<br>
+          <b style="color:#374151">能不能同时开两个软件？</b> 不能，也没必要。黑色窗口没关就再双击一次 Start.bat，它只会把已经开着的页面给你打开（开两个会共用同一份数据，同一批邮件还可能发两遍）。<br>
+          <b style="color:#374151">页面显示「数据文件出了问题、已备份」？</b> 某个数据文件坏了。软件不会覆盖它，而是原样备份成 <b>xxx.json.corrupt-日期时间</b> 放在 data 里。想恢复就把备份文件改回原名（比如 jobs.json）再重启软件。
         </p>
       </div>
     </div>
@@ -838,7 +856,11 @@ window.addEventListener("unhandledrejection", e => {
 });
 
 /* ---------- tabs ---------- */
-document.querySelectorAll("#nav button").forEach(b => b.onclick = () => {
+document.querySelectorAll("#nav button").forEach(b => b.onclick = async () => {
+  // 从「邮件模板」页离开时，先把编辑框里的改动存掉，不然改了话术却还是发旧的
+  if ($("#tab-tpl").classList.contains("active") && b.dataset.tab !== "tpl") {
+    await flushTpl(true);
+  }
   document.querySelectorAll("#nav button").forEach(x => x.classList.remove("active"));
   document.querySelectorAll(".tabpane").forEach(x => x.classList.remove("active"));
   b.classList.add("active");
@@ -851,6 +873,8 @@ document.querySelectorAll("#nav button").forEach(b => b.onclick = () => {
 let LOGS = [];
 async function loadLogs() {
   const r = await api("/api/logs");
+  // 后端出错时不要把界面清空 —— 那会让人以为"投递记录都没了"
+  if (!r || r.ok === false) { toast((r && r.error) || "投递记录读取失败，稍后再试", false); return; }
   LOGS = r.logs || [];
   renderLogs();
 }
@@ -890,30 +914,49 @@ function renderLogs() {
 /* ---------- jobs ---------- */
 async function loadJobs() {
   const r = await api("/api/jobs");
-  JOBS = r.jobs || [];
+  if (!r || r.ok === false || !Array.isArray(r.jobs)) {
+    // 读失败时保留原来显示的内容并报错，绝不显示成"清单空了"
+    if (!loadJobs._warned) {
+      loadJobs._warned = true;
+      toast((r && r.error) || "清单读取失败，界面上的内容没有被清空，稍后再试", false);
+    }
+    return;
+  }
+  loadJobs._warned = false;
+  JOBS = r.jobs;
   renderJobs();
   refreshPreviewSelect();
   renderPreview();
 }
 function isCustom(j) { return !!(j.subject_override || j.body_override || (j.atts && j.atts.length)); }
 const PROGRESS = ["未回音", "笔试", "面试", "Offer", "挂了", "我放弃"];
+/* 还差几天：按"日历上的日子"算，今天就是 0。
+   以前是拿当天 23:59:59 去减、再向上取整，结果当天会算成 1 天，
+   "就是今天"那句提示永远不会出现。 */
 function daysUntil(dstr) {
   if (!dstr) return null;
-  const d = new Date(dstr + "T23:59:59");
-  if (isNaN(d)) return null;
-  return Math.ceil((d.getTime() - Date.now()) / 86400000);
+  const p = String(dstr).split("-").map(Number);
+  if (p.length < 3 || p.some(n => isNaN(n))) return null;
+  const target = new Date(p[0], p[1] - 1, p[2]);
+  const n = new Date();
+  const today = new Date(n.getFullYear(), n.getMonth(), n.getDate());
+  return Math.round((target - today) / 86400000);
 }
 function renderStat() {
-  const sent = JOBS.filter(j => j.status === "已发送").length;
+  const sentJobs = JOBS.filter(j => j.status === "已发送");
+  const sent = sentJobs.length;
   const wait = JOBS.filter(j => j.status === "待发").length;
-  const p = k => JOBS.filter(j => j.progress === k).length;
+  // 进展只统计"已经投出去"的那些：还没发的条目就算填了"面试"也不该算进结果里
+  const p = k => sentJobs.filter(j => (j.progress || "未回音") === k).length;
+  const done = p("笔试") + p("面试") + p("Offer") + p("挂了") + p("我放弃");
   $("#statBar").innerHTML =
     `<span>已投 <b>${sent}</b> 家</span>` +
     `<span>待发 <b>${wait}</b></span>` +
-    `<span>未回音 <b>${sent ? sent - p("笔试") - p("面试") - p("Offer") - p("挂了") : 0}</b></span>` +
+    `<span>未回音 <b>${Math.max(0, sent - done)}</b></span>` +
     `<span>笔试 <b>${p("笔试")}</b></span>` +
     `<span>面试 <b>${p("面试")}</b></span>` +
-    `<span class="off">Offer <b>${p("Offer")}</b></span>`;
+    `<span class="off">Offer <b>${p("Offer")}</b></span>` +
+    `<span>挂了 <b>${p("挂了")}</b></span>`;
 }
 function clearFilters() {
   $("#fSearch").value = ""; $("#fStatus").value = ""; $("#fProgress").value = "";
@@ -979,9 +1022,16 @@ async function saveInline(id, field, value, old) {
 }
 function setProgress(id, val) {
   const j = JOBS.find(x => x.id === id);
+  const old = j ? j.progress : "";
   if (j) j.progress = val;
-  api("/api/jobs/update", { id, progress: val }).then(r => { if (!r.ok) toast(r.error, false); });
   renderJobs();
+  api("/api/jobs/update", { id, progress: val }).then(r => {
+    if (!r || r.ok === false) {                 // 没存上就把界面改回去，别让显示和真实数据对不上
+      if (j) j.progress = old;
+      renderJobs();
+      toast((r && r.error) || "进展没保存上", false);
+    }
+  });
 }
 function renderJobs() {
   const kw = ($("#fSearch").value || "").toLowerCase().trim();
@@ -1002,10 +1052,6 @@ function renderJobs() {
   });
   const tb = $("#jobRows");
   tb.innerHTML = list.map(j => {
-    const tags = [];
-    if (j.subject_override) tags.push("主题");
-    if (j.body_override) tags.push("正文");
-    if (j.atts && j.atts.length) tags.push("附件×" + j.atts.length);
     const du = daysUntil(j.event_date);
     let evHtml = "";
     if (du !== null) {
@@ -1025,9 +1071,7 @@ function renderJobs() {
       <td class="tagbox">${tagCell(j)}</td>
       <td>${pgSel}</td>
       <td>${tplCell(j)}</td>
-      <td>${tags.length
-        ? `<span class="custom-tag" style="cursor:pointer;" onclick="openAttList('${j.id}')" title="点一下看这家要发的附件">⚡ ${tags.join("·")}</span>`
-        : `<span style="color:#c0c4cc;cursor:pointer;" onclick="openAttList('${j.id}')" title="这条用上面那套话术 + 附件库里的全部附件，点一下看看是哪几个">全局</span>`}</td>
+      <td>${attCell(j)}</td>
       <td><span class="badge st-${j.status}">${j.status}</span>${j.error ? `<div class="err-text">${esc(j.error)}</div>` : ""}</td>
       <td style="font-size:12px;color:#6b7280;">${j.sent_at
         ? `<span class="lnk" style="font-size:12px;" onclick="openHist('${j.id}')" title="点一下看这家的投递记录">${esc(j.sent_at)}</span>`
@@ -1044,6 +1088,26 @@ function renderJobs() {
   updateSel();
   renderStat();
   refreshTagUI();
+}
+/* 附件那一列：直接写清这条会带几个附件。
+   以前只写个灰灰的"全局"，看不出会发几个 —— 结果把给别家准备的压缩包也发出去了。 */
+function attCell(j) {
+  const custom = !!(j.subject_override || j.body_override || (j.atts && j.atts.length));
+  const n = (j.atts && j.atts.length) ? j.atts.length : (ATTS || []).length;
+  if (custom) {
+    const t = [];
+    if (j.subject_override) t.push("主题");
+    if (j.body_override) t.push("正文");
+    if (j.atts && j.atts.length) t.push("附件×" + j.atts.length);
+    return `<span class="custom-tag" style="cursor:pointer;" onclick="openAttList('${j.id}')" ` +
+           `title="这条单独定制过，点一下看要发的附件">⚡ ${t.join("·")}</span>`;
+  }
+  if (!n) {
+    return `<span style="color:#a32d2d;cursor:pointer;font-weight:600;" onclick="openAttList('${j.id}')" ` +
+           `title="附件库里一个文件都没有，这样发出去是没有简历的！先去「发送设置」上传">⚠ 没附件</span>`;
+  }
+  return `<span style="color:#6b7280;cursor:pointer;" onclick="openAttList('${j.id}')" ` +
+         `title="这条用的是「默认」话术 + 附件库里全部 ${n} 个附件，点一下看是哪几个">全局·${n}个</span>`;
 }
 /* ---------- 标签 ---------- */
 /* 每个标签各被用了几条 —— 按条数从多到少排。
@@ -1258,14 +1322,24 @@ async function saveEdit() {
   }
   closeEdit(); toast("已保存" + droppedNote(dropped)); loadJobs();
 }
-async function deleteOne(id) { if (!confirm("确定删除这一条投递目标？")) return; await api("/api/jobs/delete", { ids: [id] }); loadJobs(); }
+async function deleteOne(id) {
+  if (!confirm("确定删除这一条投递目标？")) return;
+  const r = await api("/api/jobs/delete", { ids: [id] });
+  if (!r || r.ok === false) return toast((r && r.error) || "删除失败", false);
+  loadJobs();
+}
 async function deleteSelected() {
   const ids = selectedIds(); if (!ids.length) return toast("先勾选要删除的目标", false);
   if (!confirm("确定删除选中的 " + ids.length + " 条？")) return;
-  await api("/api/jobs/delete", { ids }); loadJobs();
+  const r = await api("/api/jobs/delete", { ids });
+  if (!r || r.ok === false) return toast((r && r.error) || "删除失败", false);
+  loadJobs();
 }
 async function resetFailed() {
-  await api("/api/jobs/reset", {}); toast("已把失败/已发送重置为待发（可重新投递）"); loadJobs();
+  const r = await api("/api/jobs/reset", {});
+  if (!r || r.ok === false) return toast((r && r.error) || "重置失败", false);
+  toast("已把失败/已发送重置为待发（可重新投递）");
+  loadJobs();
 }
 
 /* ---------- Excel import ---------- */
@@ -1307,16 +1381,32 @@ function fillTplEditor() {
   const t = curTpl();
   $("#tplSubject").value = t ? (t.subject || "") : "";
   $("#tplBody").value = t ? (t.body || "") : "";
+  markTplDirty();
 }
-/* 切换/新建前先把编辑框里的改动静默存掉，免得一换就丢 */
+/* 编辑框里的字和"已经存下来的"不一样 = 有没保存的改动 */
+function tplDirty() {
+  const t = curTpl();
+  if (!t) return false;
+  return (t.subject || "") !== $("#tplSubject").value || (t.body || "") !== $("#tplBody").value;
+}
+function markTplDirty() {
+  $("#tplDirty").style.display = tplDirty() ? "" : "none";
+  renderPreview();
+}
+/* 切换/新建/切页签/开始投递之前，先把编辑框里的改动存掉，免得改了却没生效。
+   以前只有"切模板"和"点保存"会存，改完直接去投递，发出去的是旧话术。 */
 async function flushTpl(silent) {
   const t = curTpl();
   if (!t) return true;
   const subject = $("#tplSubject").value, body = $("#tplBody").value;
-  if ((t.subject || "") === subject && (t.body || "") === body) return true;
+  if ((t.subject || "") === subject && (t.body || "") === body) { markTplDirty(); return true; }
   const r = await api("/api/template", { id: t.id, subject, body });
-  if (!r.ok) { if (!silent) toast(r.error, false); return false; }
+  if (!r || r.ok === false) {
+    toast((r && r.error) || "话术没保存上，请按一下「保存这套」再试", false);
+    return false;
+  }
   TPLS = r.templates || TPLS;
+  markTplDirty();
   return true;
 }
 async function switchTemplate(id) {
@@ -1468,13 +1558,34 @@ function renderPreview() {
 }
 
 /* ---------- config & attachments ---------- */
-async function loadState() {
-  const r = await api("/api/state");
-  CONFIG = r.config || {};
-  TPLS = r.templates || { list: [], default_id: "" };
-  MAX_TAGS = r.max_tags || 12;
-  if (!tplById(TPL_CUR)) TPL_CUR = TPLS.default_id || ((TPLS.list || [])[0] || {}).id || "";
-  ATTS = r.attachments || [];
+/* 发送节奏提示。为什么盯着这个不放：
+   邮箱判断你是不是垃圾邮件，不看内容只看"行为" —— 一个账号、短时间内、发给一堆互不相识的人。
+   这就是垃圾邮件的典型画像，投简历和打广告在它眼里长得一模一样。 */
+function checkSendRate() {
+  const iv = Number($("#cfgInterval").value || 0);
+  const dl = Number($("#cfgLimit").value || 0);
+  const bad = [];
+  const line = [];
+  if (iv && iv < 30) {
+    bad.push("⚠ " + iv + " 秒一封太快了。QQ 邮箱侧的证据是：有人一连发 9 封就被回「登录失败」、" +
+             "授权码当场作废，要重新生成、甚至等一天才能再发。");
+  } else if (iv) {
+    line.push("间隔 " + iv + " 秒 = 每分钟不到 2 封，这个节奏是安全的。");
+  }
+  if (dl > 100) {
+    bad.push("⚠ 一天 " + dl + " 封太多了。普通 QQ 邮箱一天 100～200 封就到线了，" +
+             "而且触线之后是整整一段时间都发不了，不是「多发几封才拦」。");
+  } else if (dl > 50) {
+    line.push("一天 " + dl + " 封偏多，50～100 之间建议先观察几天。");
+  } else if (dl) {
+    line.push("一天 " + dl + " 封是很保守的量，稳。");
+  }
+  const el = $("#rateTip");
+  el.innerHTML = bad.concat(line).join("<br>") ||
+    "间隔 40 秒、一天 50 封是默认值，别再改快了。";
+  el.style.color = bad.length ? "#a32d2d" : "#9ca3af";
+}
+function fillCfgInputs() {
   $("#cfgEmail").value = CONFIG.email || "";
   $("#cfgAuth").value = CONFIG.auth_code || "";
   $("#cfgDisplay").value = CONFIG.display_name || "";
@@ -1483,16 +1594,49 @@ async function loadState() {
   $("#cfgMajor").value = CONFIG.major || "";
   $("#cfgInterval").value = CONFIG.interval || 40;
   $("#cfgLimit").value = CONFIG.daily_limit || 50;
+  checkSendRate();
+}
+function showDataWarnings(list) {
+  const box = $("#dataWarn");
+  if (!list || !list.length) { box.style.display = "none"; box.innerHTML = ""; return; }
+  box.style.display = "";
+  box.innerHTML = "⚠ <b>数据文件出了点问题（原文件已经帮你留了备份，没有直接覆盖）</b><br>" +
+    list.map(t => "· " + esc(t)).join("<br>") +
+    '<div class="hint" style="margin-top:8px;">备份文件就在 <b>data</b> 文件夹里，' +
+    '文件名以 <b>.corrupt-</b> 结尾。要恢复的话，把它改回原来的名字（比如 jobs.json）再重启软件。</div>';
+}
+async function loadState() {
+  const r = await api("/api/state");
+  if (!r || r.ok === false) {
+    toast((r && r.error) || "读取设置失败，界面上的内容没有被清空，稍后再试", false);
+    return false;
+  }
+  CONFIG = r.config || {};
+  TPLS = r.templates || { list: [], default_id: "" };
+  MAX_TAGS = r.max_tags || 12;
+  if (!tplById(TPL_CUR)) TPL_CUR = TPLS.default_id || ((TPLS.list || [])[0] || {}).id || "";
+  ATTS = r.attachments || [];
+  fillCfgInputs();
   renderTplPick();
   fillTplEditor();
+  showDataWarnings(r.warnings);
   $("#qToday").textContent = r.today_sent; $("#qLimit").textContent = r.daily_limit;
-  renderAtt(r.attachments || []);
+  renderAtt(ATTS);
   MERGE_FILES = r.merge_files || [];
   renderMerge();
   if (!$("#mergeOutName").value) {
     $("#mergeOutName").value = (CONFIG.name ? CONFIG.name + "-证明材料" : "证明材料") + ".pdf";
   }
   renderPreview();
+  // 刷新页面后如果后台还在发信，把进度和日志接回来（以前刷新完就什么都看不见了）
+  if (r.send && r.send.running) {
+    $("#progWrap").classList.add("show");
+    $("#progNum").textContent = (r.send.done || 0) + "/" + (r.send.total || 0);
+    $("#progCurrent").textContent = "正在发送：" + (r.send.current || "…");
+    startPolling();
+    toast("后台还在投递中，进度已经接回来了");
+  }
+  return true;
 }
 async function saveConfig() {
   const r = await api("/api/config", {
@@ -1500,7 +1644,15 @@ async function saveConfig() {
     name: $("#cfgName").value, school: $("#cfgSchool").value, major: $("#cfgMajor").value,
     interval: $("#cfgInterval").value, daily_limit: $("#cfgLimit").value,
   });
-  if (r.ok) { toast("设置已保存"); const s = await api("/api/state"); CONFIG = s.config || {}; renderPreview(); }
+  if (!r || r.ok === false) return toast((r && r.error) || "设置没保存上", false);
+  const s = await api("/api/state");
+  if (!s || s.ok === false) return toast("设置已保存，但刷新显示失败，按一下刷新页面试试", false);
+  CONFIG = s.config || {};
+  // 存完把输入框按真实存下来的值回填一遍 —— 不然你清空了某个框、其实后端没清，
+  // 界面看着是空的，下次打开又冒出来，怎么都对不上。
+  fillCfgInputs();
+  toast("设置已保存");
+  renderPreview();
 }
 function renderAtt(list) {
   $("#attList").innerHTML = list.length ? list.map(a => `
@@ -1579,9 +1731,23 @@ function closePreview() {
 function openAttList(jobId) {
   const j = JOBS.find(x => x.id === jobId);
   if (!j) return;
-  const chosen = (j.atts && j.atts.length) ? j.atts : (ATTS || []).map(a => a.name);
+  const custom = !!(j.atts && j.atts.length);
+  const chosen = custom ? j.atts : (ATTS || []).map(a => a.name);
+  const missing = chosen.filter(n => !(ATTS || []).some(a => a.name === n));
   $("#attListTitle").textContent = "要发给「" + (j.company || j.email) + "」的附件";
-  $("#attListBody").innerHTML = chosen.length ? chosen.map(n => {
+  const head = [];
+  if (!chosen.length) {
+    head.push(`<div style="color:#a32d2d;line-height:1.9;margin-bottom:10px;">⚠️ 这条现在<b>一个附件都发不出去</b>，` +
+              `发送时会直接跳过它并报错。请先到「发送设置」上传简历。</div>`);
+  } else if (missing.length) {
+    head.push(`<div style="color:#a32d2d;line-height:1.9;margin-bottom:10px;">⚠️ 下面这些文件在附件库里已经找不到了：` +
+              `<b>${esc(missing.join("、"))}</b><br>发送时会跳过这条并报错。` +
+              `请重新上传，或者点这条的「编辑」重新勾选附件。</div>`);
+  } else if (!custom) {
+    head.push(`<div class="hint" style="margin-bottom:10px;">这条没有单独勾选附件，` +
+              `会带上附件库里的<b>全部 ${chosen.length} 个文件</b>。只想发其中几个，就点这条的「编辑」勾选。</div>`);
+  }
+  $("#attListBody").innerHTML = head.join("") + (chosen.length ? chosen.map(n => {
     const a = (ATTS || []).find(x => x.name === n);
     return `<div class="att-item">
       <div class="att-main">
@@ -1593,7 +1759,7 @@ function openAttList(jobId) {
         ? `<button class="btn" style="padding:3px 10px;" data-name="${esc(n)}" onclick="openPreview(this.dataset.name)">预览</button>` : ""}
     </div>`;
   }).join("")
-    : `<div class="empty">这条没有单独勾选附件，发送时会带上附件库里的全部文件</div>`;
+    : `<div class="empty">这条没有可以发送的附件</div>`);
   $("#attListOverlay").classList.add("show");
 }
 function closeAttList() { $("#attListOverlay").classList.remove("show"); }
@@ -1703,52 +1869,112 @@ async function runMerge() {
 
 /* ---------- send ---------- */
 async function startSend() {
+  const btn = $("#startBtn");
+  if (btn.disabled) return;                      // 防手快连点（后端也拦，这里只是第一道）
   const ids = selectedIds();
   if (!ids.length) return toast("请先勾选要投递的目标", false);
+  // 模板改了没保存就先存上，不然发出去的是旧话术
+  if (!(await flushTpl(true))) return;
   const r = await api("/api/state");
+  if (!r || r.ok === false) return toast((r && r.error) || "读取设置失败", false);
   if (!(r.config.email && r.config.auth_code)) {
     toast("请先到「发送设置」填写 QQ 邮箱和授权码", false);
     document.querySelector('#nav button[data-tab="cfg"]').click();
     return;
   }
-  if (!confirm(`即将投递 ${ids.length} 封邮件：\n· 每封间隔 ${r.config.interval} 秒，预计约 ${Math.round(ids.length * r.config.interval / 60)} 分钟\n· 每封自动替换 {公司}{岗位} 等变量并附上简历\n\n确认开始？`)) return;
-  const s = await api("/api/start", { ids });
-  if (!s.ok) return toast(s.error, false);
-  $("#progWrap").classList.add("show");
-  $("#progBar").style.width = "0%";              // 上一轮的进度条要清干净
-  $("#progNum").textContent = "0/" + s.count;
-  $("#progCurrent").textContent = "准备中…";
-  $("#logBox").innerHTML = "";
-  toast(`开始投递 ${s.count} 封`);
-  startPolling();
+  const attNames = (r.attachments || []).map(a => a.name);
+  if (!attNames.length) {
+    toast("附件库里还没有文件，先到「发送设置」上传简历", false);
+    document.querySelector('#nav button[data-tab="cfg"]').click();
+    return;
+  }
+  const slow = Number(r.config.interval) < 30;
+  if (!confirm(`即将投递 ${ids.length} 封邮件：\n` +
+      `· 每封间隔 ${r.config.interval} 秒，预计约 ${Math.round(ids.length * r.config.interval / 60)} 分钟` +
+      (slow ? "（⚠ 太密了，邮箱可能直接限制你发信，建议改成 30 秒以上）" : "") + `\n` +
+      `· 每封自动替换 {公司}{岗位} 等变量\n` +
+      `· 附件库里现在有 ${attNames.length} 个文件：${attNames.slice(0, 4).join("、")}` +
+      `${attNames.length > 4 ? "…" : ""}\n` +
+      `  （标「全局」的公司会带上全部这些文件；想只发某几个，点那条的「编辑」勾选）\n\n` +
+      `确认开始？`)) return;
+  btn.disabled = true;
+  try {
+    let s = await api("/api/start", { ids });
+    // 有目标的附件对不上：先弹出来问一句，用户点头才"只投能发的那些"
+    if (s && !s.ok && s.problems && s.problems.length && s.good_count > 0) {
+      const list = s.problems.map(p => `· ${p.name}：${p.why}`).join("\n");
+      if (confirm(s.error + "\n\n————————\n要不要先投其余 " + s.good_count +
+                  " 条能发的？\n（这 " + s.problems.length + " 条会被跳过，并在清单里标成「失败」+原因，" +
+                  "你补好附件后可以再投它们）")) {
+        s = await api("/api/start", { ids, skip_bad: true });
+      } else {
+        return;
+      }
+    }
+    if (!s || !s.ok) {
+      const msg = (s && s.error) || "启动失败";
+      if (msg.indexOf("\n") >= 0) alert(msg); else toast(msg, false);
+      return;
+    }
+    $("#progWrap").classList.add("show");
+    $("#progBar").style.width = "0%";              // 上一轮的进度条要清干净
+    $("#progNum").textContent = "0/" + s.count;
+    $("#progCurrent").textContent = "准备中…";
+    $("#logBox").innerHTML = "";
+    toast(`开始投递 ${s.count} 封`);
+    startPolling();
+  } finally {
+    btn.disabled = false;
+  }
 }
 async function stopSend() { await api("/api/stop", {}); toast("正在停止，当前这封发完就停"); }
+let pollStamp = 0, pollFails = 0;
+/* 表格里正在打字就先别重画，否则输入框会被冲掉、你打的字也没了 */
+function refreshJobsSafe() {
+  if (document.querySelector("#jobRows .cell-input")) return false;
+  loadJobs();
+  return true;
+}
+function renderProg(s) {
+  $("#progBar").style.width = (s.total ? s.done / s.total * 100 : 0) + "%";
+  $("#progNum").textContent = s.done + "/" + s.total;
+  $("#progCurrent").textContent = s.running
+    ? (s.current ? "正在发送：" + s.current : "等待下一封…") : "已结束";
+  $("#logBox").innerHTML = (s.log || [])
+    .map(l => `<div class="log-${l.level}">[${l.time}] ${esc(l.text)}</div>`).join("");
+  $("#logBox").scrollTop = 1e9;
+}
+async function pollTick() {
+  let s;
+  try { s = await api("/api/status"); } catch (e) { s = null; }
+  if (!s || s.ok === false) {
+    pollFails += 1;
+    if (pollFails >= 4) {                        // 连不上就停掉，别每 2.5 秒弹一次错
+      clearInterval(pollTimer);
+      toast("和软件的连接断了（看看启动时那个黑色窗口还在不在），刷新页面试试", false);
+    }
+    return;
+  }
+  pollFails = 0;
+  $("#qToday").textContent = s.today_sent;
+  $("#qState").textContent = s.running ? "· 投递中…" : "";
+  renderProg(s);
+  if (s.running) {
+    // 只有清单真的被改过才重画表格（以前每 2.5 秒重画一次，会打断你正在填的格子）
+    if (s.jobs_stamp !== pollStamp && refreshJobsSafe()) pollStamp = s.jobs_stamp;
+  } else {
+    clearInterval(pollTimer);
+    if (s.jobs_stamp !== pollStamp && refreshJobsSafe()) pollStamp = s.jobs_stamp;
+    if ($("#tab-logs").classList.contains("active")) loadLogs();
+    toast("本轮投递已结束，可到「投递记录」看详情");
+  }
+}
 function startPolling() {
   clearInterval(pollTimer);
-  pollTimer = setInterval(async () => {
-    const s = await api("/api/status");
-    $("#qToday").textContent = s.today_sent;
-    if (s.running) {
-      $("#progBar").style.width = (s.total ? s.done / s.total * 100 : 0) + "%";
-      $("#progNum").textContent = s.done + "/" + s.total;
-      $("#progCurrent").textContent = s.current ? "正在发送：" + s.current : "等待下一封…";
-      $("#logBox").innerHTML = s.log.map(l => `<div class="log-${l.level}">[${l.time}] ${esc(l.text)}</div>`).join("");
-      $("#logBox").scrollTop = 1e9;
-      loadJobs();
-    } else {
-      clearInterval(pollTimer);
-      // 收尾也要把进度条补到最后进度：轮询有 2.5 秒间隔，最后一封发完时
-      // running 已经变 false，如果这里不补一下，进度条就永远停在 N-1 / N。
-      $("#progBar").style.width = (s.total ? s.done / s.total * 100 : 0) + "%";
-      $("#progNum").textContent = s.done + "/" + s.total;
-      $("#progCurrent").textContent = "已结束";
-      $("#logBox").innerHTML = s.log.map(l => `<div class="log-${l.level}">[${l.time}] ${esc(l.text)}</div>`).join("");
-      $("#logBox").scrollTop = 1e9;
-      loadJobs();
-      if ($("#tab-logs").classList.contains("active")) loadLogs();
-      toast("本轮投递已结束，可到「投递记录」看详情");
-    }
-  }, 2500);
+  pollStamp = 0;
+  pollFails = 0;
+  pollTimer = setInterval(pollTick, 2500);
+  pollTick();
 }
 
 /* ---------- 在线填表 ---------- */
@@ -1761,10 +1987,15 @@ function blankSheet(n) { return Array.from({ length: n }, () => Array(SHEET_COLS
 function colName(c) { return SHEET_COL_LETTER[c] || ("第" + (c + 1) + "列"); }
 
 async function openSheet() {
-  $("#sheetOverlay").classList.add("show");
   let loaded = null;
   try { loaded = await api("/api/sheet"); } catch (e) { loaded = null; }
-  const rows = (loaded && loaded.rows) || [];
+  // 读不到草稿就先别开这张表：万一你填了新的、又把旧的覆盖掉，上次没导完的内容就真没了
+  if (!loaded || loaded.ok === false) {
+    toast((loaded && loaded.error) || "草稿读不出来，先别填，重启软件再试", false);
+    return;
+  }
+  $("#sheetOverlay").classList.add("show");
+  const rows = loaded.rows || [];
   SHEET_ROWS = Math.min(400, Math.max(40, rows.length + 10));
   SHEET = blankSheet(SHEET_ROWS);
   rows.forEach((line, r) => {
@@ -1788,7 +2019,11 @@ function queueSheetSave() {
 }
 async function sheetSaveNow() {
   saveTimer = null;
-  try { await api("/api/sheet", { rows: SHEET }); } catch (e) {}
+  // 只存"有内容的部分"：不然每次打开这张表都会多存 10 行空白，
+  // 行数一路涨到 400，草稿文件也越存越大。
+  let n = SHEET.length;
+  while (n > 0 && !SHEET[n - 1].some(v => v && String(v).trim())) n--;
+  try { await api("/api/sheet", { rows: SHEET.slice(0, n) }); } catch (e) {}
 }
 function renderSheet() {
   const W = [190, 190, 230, 240];
@@ -2012,6 +2247,10 @@ $("#sheetFile").onchange = async e => {
 };
 
 /* ---------- init ---------- */
+// 模板改了没保存就想关页面/刷新，提醒一句（不然改了半天的话术白改）
+window.addEventListener("beforeunload", e => {
+  if (tplDirty()) { e.preventDefault(); e.returnValue = ""; }
+});
 document.addEventListener("keydown", e => {
   if (e.key !== "Escape") return;
   if ($("#sheetOverlay").classList.contains("show")) return closeSheet();

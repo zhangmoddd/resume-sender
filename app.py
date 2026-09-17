@@ -47,6 +47,12 @@ SHEET_COLS = ["company", "position", "email", "note"]
 SHEET_COLS_CN = ["公司", "岗位", "收件邮箱", "备注"]
 MAX_TAGS_PER_JOB = 12                     # 一条最多几个标签，防止乱填撑爆界面
 
+# 两封邮件之间最少隔多少秒。这不是性能问题，是账号安全问题：
+# 邮箱服务商看不懂"你在投简历"，它只看"一个账号短时间内发给一堆互不相识的人、内容还差不多"，
+# 这就是垃圾邮件的典型画像，频率越高越先被拦。所以再想快也不让填到 20 秒以下。
+MIN_SEND_INTERVAL = 20
+SAFE_SEND_INTERVAL = 30                   # 界面上低于这个数会提示"太快了"
+
 # ---------------------------------------------------------------- 材料合并
 # 暂存区：用户丢进来的证明材料先放这儿，排好顺序再合成。
 # 顺序直接写进文件名开头的序号（001__、002__…），所以关掉软件再打开顺序也不会乱。
@@ -100,23 +106,73 @@ DEFAULT_TEMPLATE = {
 
 
 # ---------------------------------------------------------------- 数据存取
+# 一把全局锁：所有 json 的"读出来 → 改 → 写回去"都必须整段在锁里完成。
+# 不然两个操作同时发生（发信线程 + 网页上的改动），后写的那次会把先写的覆盖掉。
+DATA_LOCK = threading.RLock()
+# 读坏 / 写坏过的文件，会在网页顶部提醒用户
+DATA_WARNINGS = []
+
+
 def _path(name):
     return os.path.join(DATA_DIR, name)
 
 
-def load_json(name, default):
+def _warn(text):
+    if text not in DATA_WARNINGS:
+        DATA_WARNINGS.append(text)
+    print("[警告] %s" % text)
+
+
+def _quarantine(path, why):
+    """文件内容读不出来时，先改名留一份，绝不直接覆盖 —— 原文件是用户唯一的底稿。"""
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup = "%s.corrupt-%s" % (path, stamp)
     try:
-        with open(_path(name), "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return default
+        os.replace(path, backup)
+    except OSError:
+        backup = path
+    _warn("%s 的内容读不出来（%s），已把原文件备份成「%s」，软件先按「没有数据」显示。"
+          % (os.path.basename(path), why, os.path.basename(backup)))
+    return backup
+
+
+def load_json(name, default):
+    p = _path(name)
+    with DATA_LOCK:
+        if not os.path.exists(p):
+            return default
+        try:
+            f = open(p, "r", encoding="utf-8")
+        except FileNotFoundError:
+            return default
+        except OSError as e:
+            # 文件只是暂时打不开（被别的程序占着之类），这时绝不能动它
+            _warn("%s 暂时读不出来（%s），本次按空数据处理，原文件没有改动。"
+                  % (os.path.basename(p), e))
+            return default
+        try:
+            with f:
+                return json.load(f)
+        except Exception as e:
+            _quarantine(p, e)
+            return default
 
 
 def save_json(name, obj):
-    tmp = _path(name + ".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(obj, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, _path(name))
+    """"先写临时文件、再改名"。临时文件名带进程号和线程号 —— 两个请求同时保存也不会互相踩。"""
+    with DATA_LOCK:
+        p = _path(name)
+        tmp = "%s.%d.%d.tmp" % (p, os.getpid(), threading.get_ident())
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(obj, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, p)
+        finally:
+            if os.path.exists(tmp):
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
 
 
 def init_dirs():
@@ -221,23 +277,75 @@ def save_templates(tpls):
 
 
 def get_jobs():
-    return load_json("jobs.json", [])
+    jobs = load_json("jobs.json", [])
+    return jobs if isinstance(jobs, list) else []
 
 
 def save_jobs(jobs):
     save_json("jobs.json", jobs)
 
 
+def mutate_jobs(fn):
+    """清单的"读最新 → 改 → 写回"必须整段锁在一起。
+
+    以前是"先把整份清单读进内存，改完再整份写回去"，
+    结果发信线程手上的旧副本会把用户在网页上的改动全部盖掉（删掉的公司还会复活）。
+    凡是要改清单的地方都走这个函数。
+    """
+    with DATA_LOCK:
+        jobs = get_jobs()
+        fn(jobs)
+        save_jobs(jobs)
+        return jobs
+
+
+def mutate_job(jid, fn):
+    """只动清单里的某一条，其他条目保持磁盘上的最新状态。没找到返回 False。"""
+    hit = []
+
+    def _run(jobs):
+        for j in jobs:
+            if str(j.get("id")) == str(jid):
+                fn(j)
+                hit.append(True)
+                break
+
+    mutate_jobs(_run)
+    return bool(hit)
+
+
+def find_job(jid):
+    for j in get_jobs():
+        if str(j.get("id")) == str(jid):
+            return j
+    return None
+
+
+def jobs_stamp():
+    """清单文件的改动时间。网页轮询时拿它比较，只有真变了才重画表格
+    （不然每 2.5 秒重画一次，会把你正在填的那个格子打断）。"""
+    try:
+        return os.path.getmtime(_path("jobs.json"))
+    except OSError:
+        return 0
+
+
 def today_sent_count():
     today = datetime.now().strftime("%Y-%m-%d")
     logs = load_json("sent_log.json", [])
-    return sum(1 for e in logs if e.get("sent_at", "").startswith(today) and e.get("ok"))
+    if not isinstance(logs, list):
+        return 0
+    return sum(1 for e in logs
+               if isinstance(e, dict) and str(e.get("sent_at", "")).startswith(today) and e.get("ok"))
 
 
 def append_sent_log(entry):
-    logs = load_json("sent_log.json", [])
-    logs.append(entry)
-    save_json("sent_log.json", logs)
+    with DATA_LOCK:
+        logs = load_json("sent_log.json", [])
+        if not isinstance(logs, list):
+            logs = []
+        logs.append(entry)
+        save_json("sent_log.json", logs)
 
 
 # ---------------------------------------------------------------- 变量渲染
@@ -261,7 +369,8 @@ def split_tags(v, limit=None):
     """把标签统一成去重后的列表，顺便告诉你被挤掉几个。
 
     前端传列表 ["9/19投", "国企"] 或字符串 "9/19投,国企" 都能收。
-    逗号（中英文）、分号、空格都当分隔符。
+    逗号（中英文）、顿号、分号、竖线、空格都当分隔符 ——
+    中文里"国企、内推、9/19投"很常见，以前顿号不算分隔符，会被当成一个超长标签。
     返回 (要存的标签, 被挤掉的个数) —— 第二条是给界面提示用的：
     以前超了就默默丢掉，用户以为"没显示"，其实是压根没存进去。
     """
@@ -271,7 +380,7 @@ def split_tags(v, limit=None):
     else:
         raw = str(v or "")
     out = []
-    for p in re.split(r"[,，;；\s]+", raw):
+    for p in re.split(r"[,，、;；|｜\s]+", raw):
         p = p.strip()
         if p and p not in out:
             out.append(p)
@@ -645,7 +754,7 @@ def merge_run(out_name):
 
 def resolve_attachments(job):
     """按投递目标解析附件：atts 为空 -> 发全部附件；否则只发勾选的（按勾选顺序）。"""
-    chosen = job.get("atts") or []
+    chosen = [str(x) for x in ((job or {}).get("atts") or [])]
     all_atts = list_attachments()
     if not chosen:
         return all_atts
@@ -654,6 +763,24 @@ def resolve_attachments(job):
     order = {n: i for i, n in enumerate(chosen)}
     picked.sort(key=lambda a: order.get(a["name"], 999))
     return picked
+
+
+def attachment_problem(job):
+    """发送前先检查这一条的附件到底能不能发出去。没问题返回 ""，有问题返回原因。
+
+    为什么非要拦：以前附件对不上时，邮件会"没带简历照样发出去"，状态还记成「已发送」，
+    用户根本看不出来。现在宁可这一条不发、明确报错。
+    """
+    chosen = [str(x) for x in ((job or {}).get("atts") or [])]
+    have = {a["name"] for a in list_attachments()}
+    if not chosen:
+        if not have:
+            return "附件库里一个文件都没有，请先到「发送设置」上传简历"
+        return ""
+    missing = [n for n in chosen if n not in have]
+    if missing:
+        return "指定的附件在附件库里找不到：%s（被删掉或改过名了？）" % "、".join(missing[:3])
+    return ""
 
 
 def build_message(job, cfg, tpls):
@@ -670,8 +797,8 @@ def build_message(job, cfg, tpls):
     display = cfg.get("display_name") or cfg.get("name") or "求职者"
 
     msg = MIMEMultipart()
-    msg["From"] = formataddr((str(Header(display, "utf-8")), cfg["email"]))
-    msg["To"] = job["email"]
+    msg["From"] = formataddr((str(Header(display, "utf-8")), cfg.get("email", "")))
+    msg["To"] = str(job.get("email") or "")
     msg["Subject"] = Header(subject, "utf-8")
     msg.attach(MIMEText(body, "plain", "utf-8"))
 
@@ -686,16 +813,22 @@ def build_message(job, cfg, tpls):
 
 
 def send_one(job, cfg, tpls):
+    email = str(job.get("email") or "").strip()
+    if "@" not in email or email.startswith("@") or email.endswith("@"):
+        return False, "这一条的收件邮箱不对（%s），先在清单里改好" % (email or "空着"), "", ""
     try:
         msg, subject, tpl_name = build_message(job, cfg, tpls)
         with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=30) as s:
-            s.login(cfg["email"], cfg["auth_code"])
+            s.login(cfg.get("email", ""), cfg.get("auth_code", ""))
             s.send_message(msg)
         return True, "", subject, tpl_name
     except smtplib.SMTPAuthenticationError:
         return False, "登录失败：邮箱地址或授权码不正确（授权码不是QQ密码，需在QQ邮箱设置里生成）", "", ""
     except (smtplib.SMTPException, socket.timeout, OSError) as e:
         return False, "发送失败：%s" % e, "", ""
+    except Exception as e:
+        # 兜底：任何没预想到的毛病都算这一封失败，不能让整批静默中断
+        return False, "发送失败：%s: %s" % (type(e).__name__, e), "", ""
 
 
 # ---------------------------------------------------------------- 发送线程
@@ -707,6 +840,9 @@ SEND_STATE = {
     "total": 0,
     "log": [],  # {time, text, level}
 }
+# 启动投递时用它把"检查是否在跑"和"标记为在跑"锁成一步。
+# 不然两次请求几乎同时进来，都读到"没在跑"，就会同时起两个发送任务 —— 同一批邮件发两遍。
+SEND_LOCK = threading.Lock()
 
 
 def log_add(text, level="info"):
@@ -727,17 +863,16 @@ def _interruptible_sleep(seconds):
 
 
 def sender_worker(job_ids):
+    """后台一封封发。
+
+    注意：这里**不再**一次性把整份清单读进内存然后整份写回。
+    每发一封都重新从磁盘读这一条（用户刚删掉的就不会再发），
+    只改这一条的几个字段再写回 —— 这样你在网页上改进展、备注、标签都不会被盖掉。
+    """
     cfg = get_config()
     tpls = get_templates()
-    interval = max(5, int(cfg.get("interval", 40)))
+    interval = max(MIN_SEND_INTERVAL, int(cfg.get("interval", 40)))
     daily_limit = int(cfg.get("daily_limit", 50))
-    jobs = get_jobs()
-    by_id = {j["id"]: j for j in jobs}
-
-    SEND_STATE["running"] = True
-    SEND_STATE["stop"] = False
-    SEND_STATE["done"] = 0
-    SEND_STATE["total"] = len(job_ids)
     log_add("开始投递，共 %d 封，每封间隔 %d 秒" % (len(job_ids), interval))
 
     try:
@@ -745,40 +880,58 @@ def sender_worker(job_ids):
             if SEND_STATE["stop"]:
                 log_add("已手动停止", "err")
                 break
-            job = by_id.get(jid)
+            job = find_job(jid)
             if not job:
+                log_add("这一条已经被删掉了，跳过", "err")
+                SEND_STATE["done"] += 1
                 continue
             if today_sent_count() >= daily_limit:
                 log_add("已达今日发送上限（%d 封），剩余目标已跳过，明天再继续" % daily_limit, "err")
-                job["status"] = "待发"
                 break
 
-            job["status"] = "发送中"
-            job["error"] = ""
+            # 附件对不上就这一条不发，明确写清原因（绝不发"没带简历"的邮件还记成成功）
+            problem = attachment_problem(job)
+            if problem:
+                err = "未发送：%s" % problem
+                mutate_job(jid, lambda j, e=err: j.update({"status": "失败", "error": e}))
+                append_sent_log({"id": jid, "company": job.get("company"),
+                                 "email": job.get("email"), "ok": False, "error": err,
+                                 "sent_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
+                log_add("%s：%s" % (job.get("company"), err), "err")
+                SEND_STATE["done"] += 1
+                continue
+
             SEND_STATE["current"] = "%s · %s" % (job.get("company", ""), job.get("position", ""))
-            save_jobs(jobs)
+            if not mutate_job(jid, lambda j: j.update({"status": "发送中", "error": ""})):
+                log_add("这一条刚好被删掉了，跳过", "err")     # 用户刚删的，就别再发了
+                SEND_STATE["done"] += 1
+                continue
 
             ok, err, subject, tpl_name = send_one(job, cfg, tpls)
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            if ok:
-                job["status"] = "已发送"
-                job["sent_at"] = now
-                job["error"] = ""
-                log_add("已发送：%s → %s（用「%s」｜主题：%s）"
-                        % (job.get("company"), job["email"], tpl_name, subject), "ok")
-            else:
-                job["status"] = "失败"
-                job["error"] = err
-                log_add("%s：%s" % (job.get("company"), err), "err")
+
+            def _apply(j, ok=ok, err=err, now=now):
+                if ok:
+                    j.update({"status": "已发送", "sent_at": now, "error": ""})
+                else:
+                    j.update({"status": "失败", "error": err})
+
+            mutate_job(jid, _apply)
             append_sent_log({
-                "id": job["id"], "company": job.get("company"), "email": job["email"],
+                "id": jid, "company": job.get("company"), "email": job.get("email"),
                 "ok": ok, "error": err, "sent_at": now,
             })
-            save_jobs(jobs)
+            if ok:
+                log_add("已发送：%s → %s（用「%s」｜主题：%s）"
+                        % (job.get("company"), job.get("email"), tpl_name, subject), "ok")
+            else:
+                log_add("%s：%s" % (job.get("company"), err), "err")
             SEND_STATE["done"] += 1
 
             if idx < len(job_ids) - 1 and not SEND_STATE["stop"]:
                 _interruptible_sleep(interval)
+    except Exception as e:
+        log_add("投递过程中出了意外，已停下来：%s: %s" % (type(e).__name__, e), "err")
     finally:
         SEND_STATE["running"] = False
         SEND_STATE["current"] = ""
@@ -942,38 +1095,40 @@ def excel_import(b64_data, tags=None):
         start_row = 2 if _looks_like_header([c.value for c in ws[1]]) else 1
 
     tags, tags_dropped = split_tags(tags)
-    jobs = get_jobs()
-    existing = {(j.get("email"), j.get("position"), j.get("company")) for j in jobs}
     tpls = get_templates()
     tpl_by_name = {t["name"]: t["id"] for t in tpls["list"]}
     added, skipped, bad, tpl_miss = 0, 0, 0, 0
-    for row in ws.iter_rows(min_row=start_row):
-        vals = {k: (_cell_text(row[c - 1].value) if 1 <= c <= len(row) else "")
-                for k, c in header_map.items()}
-        company = vals.get("company", "")
-        position = vals.get("position", "")
-        email = vals.get("email", "")
-        note = vals.get("note", "")
-        if not company and not position and not email and not note:
-            continue                                   # 整行空着，跳过
-        if "@" not in email:
-            bad += 1                                   # 没有邮箱，发不了，算无效
-            continue
-        # 「投递定位」那一列：写模板名字；写「默认」或留空就跟随默认那套
-        tname = (vals.get("template") or "").strip()
-        tpl_id = ""
-        if tname and tname != DEFAULT_TPL_NAME:
-            tpl_id = tpl_by_name.get(tname, "")
-            if not tpl_id:
-                tpl_miss += 1                          # 名字对不上，就当默认处理，不挡导入
-        r = _append_job(jobs, existing, company, position, email, note, tags,
-                        vals.get("progress", ""), vals.get("event_date", ""),
-                        vals.get("mynote", ""), tpl_id)
-        if r == "dup":
-            skipped += 1
-        else:
-            added += 1
-    save_jobs(jobs)
+
+    with DATA_LOCK:                                    # 读最新 → 追加 → 写回，整段锁住
+        jobs = get_jobs()
+        existing = {(j.get("email"), j.get("position"), j.get("company")) for j in jobs}
+        for row in ws.iter_rows(min_row=start_row):
+            vals = {k: (_cell_text(row[c - 1].value) if 1 <= c <= len(row) else "")
+                    for k, c in header_map.items()}
+            company = vals.get("company", "")
+            position = vals.get("position", "")
+            email = vals.get("email", "")
+            note = vals.get("note", "")
+            if not company and not position and not email and not note:
+                continue                               # 整行空着，跳过
+            if "@" not in email:
+                bad += 1                               # 没有邮箱，发不了，算无效
+                continue
+            # 「投递定位」那一列：写模板名字；写「默认」或留空就跟随默认那套
+            tname = (vals.get("template") or "").strip()
+            tpl_id = ""
+            if tname and tname != DEFAULT_TPL_NAME:
+                tpl_id = tpl_by_name.get(tname, "")
+                if not tpl_id:
+                    tpl_miss += 1                      # 名字对不上，就当默认处理，不挡导入
+            r = _append_job(jobs, existing, company, position, email, note, tags,
+                            vals.get("progress", ""), vals.get("event_date", ""),
+                            vals.get("mynote", ""), tpl_id)
+            if r == "dup":
+                skipped += 1
+            else:
+                added += 1
+        save_jobs(jobs)
     return {"added": added, "skipped": skipped, "invalid": bad, "tpl_miss": tpl_miss,
             "tags_dropped": tags_dropped}
 
@@ -990,28 +1145,29 @@ def import_rows(rows, tags=None):
         raise ValueError("没有选中任何内容，先在表格里框一块区域")
 
     tags, tags_dropped = split_tags(tags)
-    jobs = get_jobs()
-    existing = {(j.get("email"), j.get("position"), j.get("company")) for j in jobs}
     added, skipped, bad, header_skip = 0, 0, 0, 0
 
-    for i, raw in enumerate(rows):
-        vals = [(raw[c] if isinstance(raw, list) and c < len(raw) else "") for c in range(len(SHEET_COLS))]
-        vals = [_cell_text(v) for v in vals]
-        if not header_skip and i < 3 and _looks_like_header(vals):
-            header_skip = 1                            # 框进来的表头行，自动跳过（最多跳一行）
-            continue
-        company, position, email, note = vals
-        if not any(vals):
-            continue
-        if "@" not in email:
-            bad += 1
-            continue
-        r = _append_job(jobs, existing, company, position, email, note, tags)
-        if r == "dup":
-            skipped += 1
-        else:
-            added += 1
-    save_jobs(jobs)
+    with DATA_LOCK:                                    # 同上：整段锁住，别和发信线程互相覆盖
+        jobs = get_jobs()
+        existing = {(j.get("email"), j.get("position"), j.get("company")) for j in jobs}
+        for i, raw in enumerate(rows):
+            vals = [(raw[c] if isinstance(raw, list) and c < len(raw) else "") for c in range(len(SHEET_COLS))]
+            vals = [_cell_text(v) for v in vals]
+            if not header_skip and i < 3 and _looks_like_header(vals):
+                header_skip = 1                        # 框进来的表头行，自动跳过（最多跳一行）
+                continue
+            company, position, email, note = vals
+            if not any(vals):
+                continue
+            if "@" not in email:
+                bad += 1
+                continue
+            r = _append_job(jobs, existing, company, position, email, note, tags)
+            if r == "dup":
+                skipped += 1
+            else:
+                added += 1
+        save_jobs(jobs)
     return {"added": added, "skipped": skipped, "invalid": bad, "header_skipped": header_skip,
             "tags_dropped": tags_dropped}
 
@@ -1171,6 +1327,7 @@ class Handler(BaseHTTPRequestHandler):
                     "daily_limit": cfg.get("daily_limit", 50),
                     "attachments": list_attachments(),
                     "merge_files": merge_list(),
+                    "warnings": list(DATA_WARNINGS),
                 })
             elif path == "/api/jobs":
                 self._json({"ok": True, "jobs": get_jobs()})
@@ -1188,7 +1345,8 @@ class Handler(BaseHTTPRequestHandler):
                     "current": SEND_STATE["current"],
                     "done": SEND_STATE["done"],
                     "total": SEND_STATE["total"],
-                    "log": SEND_STATE["log"][-30:],
+                    "log": SEND_STATE["log"][-200:],
+                    "jobs_stamp": jobs_stamp(),
                     "today_sent": today_sent_count(),
                 })
             else:
@@ -1215,15 +1373,23 @@ class Handler(BaseHTTPRequestHandler):
                 cfg = get_config()
                 for k in ("email", "auth_code", "display_name", "name",
                           "school", "major", "interval", "daily_limit"):
-                    if k in body and body[k] != "":
-                        v = body[k]
-                        if k in ("interval", "daily_limit"):
-                            v = max(5, int(v))
-                        if k == "auth_code" and v == "******":
-                            continue
-                        cfg[k] = v
+                    if k not in body:
+                        continue
+                    v = body[k]
+                    if k in ("interval", "daily_limit"):
+                        try:
+                            v = int(str(v).strip())
+                        except ValueError:
+                            continue                   # 填了非数字就保持原样，别把设置写坏
+                        # 间隔有下限：填得再小也不让发那么快（太快会被邮箱当成垃圾邮件，账号会被限）
+                        cfg[k] = max(MIN_SEND_INTERVAL if k == "interval" else 5, v)
+                        continue
+                    if k == "auth_code" and str(v) == "******":
+                        continue                       # 网页上显示的就是星号，原样发回来不能当成新授权码
+                    # 其它字段允许清空（以前空字符串会被忽略，用户以为清掉了，其实后端还是旧值）
+                    cfg[k] = str(v).strip()
                 save_json("config.json", cfg)
-                self._json({"ok": True})
+                self._json({"ok": True})               # 不回传授权码，网页要显示就再读 /api/state（那里是星号）
             elif path == "/api/template":
                 # 保存某一套话术的内容。不带 id 就存默认那套（老前端也能用）
                 tpls = get_templates()
@@ -1298,15 +1464,16 @@ class Handler(BaseHTTPRequestHandler):
                     tpls["default_id"] = tpls["list"][0]["id"]
                 save_templates(tpls)
                 # 原来挂在它上面的清单，回到「默认」，用户想改再手动改
-                jobs = get_jobs()
-                n = 0
-                for j in jobs:
-                    if str(j.get("template_id") or "") == tid:
-                        j["template_id"] = ""
-                        n += 1
-                if n:
-                    save_jobs(jobs)
-                self._json({"ok": True, "templates": tpls, "reset": n})
+                n = []
+
+                def _detach(jobs):
+                    for j in jobs:
+                        if str(j.get("template_id") or "") == tid:
+                            j["template_id"] = ""
+                            n.append(True)
+
+                mutate_jobs(_detach)
+                self._json({"ok": True, "templates": tpls, "reset": len(n)})
             elif path == "/api/preview":
                 job_id = body.get("job_id", "")
                 jobs = get_jobs()
@@ -1332,7 +1499,6 @@ class Handler(BaseHTTPRequestHandler):
                     "job": job,
                 })
             elif path == "/api/jobs/add":
-                jobs = get_jobs()
                 job_tags, tags_dropped = split_tags(body.get("tags"))
                 job = {
                     "id": "j%d" % int(time.time() * 1000),
@@ -1353,42 +1519,54 @@ class Handler(BaseHTTPRequestHandler):
                 if "@" not in job["email"]:
                     self._json({"ok": False, "error": "收件邮箱格式不正确"})
                     return
-                jobs.append(job)
-                save_jobs(jobs)
+                mutate_jobs(lambda jobs: jobs.append(job))
                 self._json({"ok": True, "job": job, "tags_dropped": tags_dropped})
             elif path == "/api/jobs/update":
-                jobs = get_jobs()
                 jid = body.get("id")
                 tags_dropped = 0
-                for j in jobs:
-                    if j["id"] == jid:
-                        for k in ("company", "position", "email", "note", "subject_override",
-                                  "body_override", "mynote", "event_date", "template_id"):
-                            if k in body:
-                                j[k] = str(body[k]).strip()
-                        if "progress" in body:
-                            v = str(body["progress"]).strip()
-                            j["progress"] = v if v in ("未回音", "笔试", "面试", "Offer", "挂了", "我放弃") else "未回音"
-                        if "atts" in body:
-                            j["atts"] = [str(a) for a in (body.get("atts") or [])]
-                        if "tags" in body:
-                            new_tags, tags_dropped = split_tags(body.get("tags"))
-                            j["tags"] = new_tags
-                        break
-                save_jobs(jobs)
+                found = []
+
+                def _upd(j):
+                    nonlocal tags_dropped
+                    found.append(True)
+                    # 单行字段去掉首尾空格；正文和笔记保留原样（里面可能有换行和缩进）
+                    for k in ("company", "position", "email", "note", "subject_override",
+                              "event_date", "template_id"):
+                        if k in body:
+                            j[k] = str(body[k]).strip()
+                    for k in ("body_override", "mynote"):
+                        if k in body:
+                            j[k] = str(body[k])
+                    if "progress" in body:
+                        v = str(body["progress"]).strip()
+                        j["progress"] = v if v in ("未回音", "笔试", "面试", "Offer", "挂了", "我放弃") else "未回音"
+                    if "atts" in body:
+                        j["atts"] = [str(a) for a in (body.get("atts") or [])]
+                    if "tags" in body:
+                        new_tags, tags_dropped = split_tags(body.get("tags"))
+                        j["tags"] = new_tags
+
+                mutate_job(jid, _upd)
+                if not found:
+                    self._json({"ok": False, "error": "这一条已经不在了（可能是另一个页面删掉了），刷新一下看看"})
+                    return
                 self._json({"ok": True, "tags_dropped": tags_dropped})
             elif path == "/api/jobs/delete":
-                ids = set(body.get("ids", []))
-                jobs = [j for j in get_jobs() if j["id"] not in ids]
-                save_jobs(jobs)
+                ids = {str(x) for x in (body.get("ids") or [])}
+
+                def _del(jobs):
+                    jobs[:] = [j for j in jobs if str(j.get("id")) not in ids]
+
+                mutate_jobs(_del)
                 self._json({"ok": True})
             elif path == "/api/jobs/reset":
-                jobs = get_jobs()
-                for j in jobs:
-                    if j["status"] in ("失败", "已发送"):
-                        j["status"] = "待发"
-                        j["error"] = ""
-                save_jobs(jobs)
+                def _reset_all(jobs):
+                    for j in jobs:
+                        if j.get("status") in ("失败", "已发送"):
+                            j["status"] = "待发"
+                            j["error"] = ""
+
+                mutate_jobs(_reset_all)
                 self._json({"ok": True})
             elif path == "/api/jobs/import":
                 result = excel_import(body.get("data", ""), body.get("tags"))
@@ -1404,26 +1582,28 @@ class Handler(BaseHTTPRequestHandler):
                 if mode in ("add", "remove") and not want:
                     self._json({"ok": False, "error": "先写要打的标签（多个用逗号隔开）"})
                     return
-                jobs = get_jobs()
-                hit = 0
-                for j in jobs:
-                    if j["id"] not in ids:
-                        continue
-                    cur = [t for t in (j.get("tags") or []) if t]
-                    if mode == "set":
-                        cur = list(want)
-                    elif mode == "remove":
-                        drop = set(want)
-                        cur = [t for t in cur if t not in drop]
-                    else:
-                        for t in want:
-                            if t not in cur:
-                                cur.append(t)
-                        cur = cur[:MAX_TAGS_PER_JOB]
-                    j["tags"] = cur
-                    hit += 1
-                save_jobs(jobs)
-                self._json({"ok": True, "count": hit, "all_tags": tag_all(),
+                hit = []
+
+                def _tag(jobs):
+                    for j in jobs:
+                        if str(j.get("id")) not in ids:
+                            continue
+                        cur = [t for t in (j.get("tags") or []) if t]
+                        if mode == "set":
+                            cur = list(want)
+                        elif mode == "remove":
+                            drop = set(want)
+                            cur = [t for t in cur if t not in drop]
+                        else:
+                            for t in want:
+                                if t not in cur:
+                                    cur.append(t)
+                            cur = cur[:MAX_TAGS_PER_JOB]
+                        j["tags"] = cur
+                        hit.append(True)
+
+                mutate_jobs(_tag)
+                self._json({"ok": True, "count": len(hit), "all_tags": tag_all(),
                             "tags_dropped": tags_dropped, "max_tags": MAX_TAGS_PER_JOB})
             elif path == "/api/sheet":
                 rows = sheet_save(body.get("rows"))
@@ -1497,42 +1677,97 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": True, "output": out, "pages": pages, "size": size,
                             "attachments": list_attachments(), "files": merge_list()})
             elif path == "/api/start":
-                if SEND_STATE["running"]:
-                    self._json({"ok": False, "error": "已有投递任务在进行中"})
-                    return
-                cfg = get_config()
-                if not cfg.get("email") or not cfg.get("auth_code"):
-                    self._json({"ok": False, "error": "请先在「发送设置」中填写 QQ 邮箱和授权码"})
-                    return
-                ids = body.get("ids", [])
-                jobs = get_jobs()
-                valid = [j["id"] for j in jobs if j["id"] in set(ids) and j["status"] != "已发送"]
-                if not valid:
-                    self._json({"ok": False, "error": "没有可投递的目标（已发送的不会重复投递）"})
-                    return
-                # 这一批要用到的每套话术都得填好主题和正文，否则发出去是空白邮件
-                tpls = get_templates()
-                bad_tpl = []
-                for j in jobs:
-                    if j["id"] not in set(valid):
-                        continue
-                    t = template_for_job(j, tpls)
-                    if not str(t.get("subject") or "").strip() or not str(t.get("body") or "").strip():
-                        nm = t.get("name") or "未命名"
-                        if nm not in bad_tpl:
-                            bad_tpl.append(nm)
-                if bad_tpl:
-                    self._json({"ok": False,
-                                "error": "「%s」这套话术的主题或正文还是空的，先去「邮件模板」写完再投"
-                                         % "、".join(bad_tpl)})
-                    return
-                for j in jobs:
-                    if j["id"] in set(valid) and j["status"] == "失败":
-                        j["status"] = "待发"
-                        j["error"] = ""
-                save_jobs(jobs)
-                threading.Thread(target=sender_worker, args=(valid,), daemon=True).start()
-                self._json({"ok": True, "count": len(valid)})
+                # 整段加锁：检查"是否在跑"和标记"开始跑"必须是同一口气完成的，
+                # 否则连点两下会同时起两个发送任务，同一批邮件发两遍。
+                with SEND_LOCK:
+                    if SEND_STATE["running"]:
+                        self._json({"ok": False, "error": "已有投递任务在进行中，等它跑完再投"})
+                        return
+                    cfg = get_config()
+                    if not cfg.get("email") or not cfg.get("auth_code"):
+                        self._json({"ok": False, "error": "请先在「发送设置」中填写 QQ 邮箱和授权码"})
+                        return
+                    ids = body.get("ids", [])
+                    jobs = get_jobs()
+                    valid = [j for j in jobs
+                             if j.get("id") in set(ids) and j.get("status") != "已发送"]
+                    if not valid:
+                        self._json({"ok": False, "error": "没有可投递的目标（已发送的不会重复投递）"})
+                        return
+                    # 这一批要用到的每套话术都得填好主题和正文，否则发出去是空白邮件
+                    tpls = get_templates()
+                    bad_tpl = []
+                    for j in valid:
+                        t = template_for_job(j, tpls)
+                        if not str(t.get("subject") or "").strip() or not str(t.get("body") or "").strip():
+                            nm = t.get("name") or "未命名"
+                            if nm not in bad_tpl:
+                                bad_tpl.append(nm)
+                    if bad_tpl:
+                        self._json({"ok": False,
+                                    "error": "「%s」这套话术的主题或正文还是空的，先去「邮件模板」写完再投"
+                                             % "、".join(bad_tpl)})
+                        return
+                    # 附件预检：附件对不上的绝不发出去（以前会静默发一封没带简历的邮件）。
+                    # 默认先拦下来问一句；用户在网页上选"只投能发的"才带着 skip_bad 再来一次。
+                    bad, good = [], []
+                    for j in valid:
+                        p = attachment_problem(j)
+                        (bad if p else good).append((j, p))
+                    if bad and not body.get("skip_bad"):
+                        lines = ["%s：%s" % (j.get("company") or j.get("email") or "未命名", p)
+                                 for j, p in bad[:5]]
+                        more = "，还有 %d 条" % (len(bad) - 5) if len(bad) > 5 else ""
+                        self._json({
+                            "ok": False,
+                            "problems": [{"id": j.get("id"),
+                                          "name": j.get("company") or j.get("email") or "未命名",
+                                          "why": p} for j, p in bad],
+                            "good_count": len(good),
+                            "error": "有 %d 条目标的附件对不上，先别发：\n\n%s%s\n\n"
+                                     "处理办法：到「发送设置」把附件补上，"
+                                     "或者点这些公司的「编辑」重新勾选附件。"
+                                     % (len(bad), "\n".join(lines), more)})
+                        return
+                    if bad:                                  # 用户选了"只投能发的"，这几条标成失败并写清原因
+                        bad_ids = {j.get("id") for j, _ in bad}
+                        reasons = {j.get("id"): p for j, p in bad}
+
+                        def _mark(jobs_all):
+                            for j in jobs_all:
+                                if j.get("id") in bad_ids:
+                                    j["status"] = "失败"
+                                    j["error"] = "未发送：%s" % reasons[j["id"]]
+
+                        mutate_jobs(_mark)
+                        for j, p in bad:
+                            log_add("跳过（附件问题）：%s —— %s"
+                                    % (j.get("company") or j.get("email"), p), "err")
+                        valid = [j for j, _ in good]
+                        if not valid:
+                            self._json({"ok": False, "error": "选中的目标附件都有问题，一条都发不了"})
+                            return
+                    valid_ids = [j["id"] for j in valid]
+                    vs = set(valid_ids)
+
+                    def _reset(jobs_all):
+                        for j in jobs_all:
+                            # 失败的重发；上次卡在「发送中」的（比如中途关了窗口）也放回待发，
+                            # 不然那条的状态会永远停在"发送中"
+                            if j.get("id") in vs and j.get("status") in ("失败", "发送中"):
+                                j["status"] = "待发"
+                                j["error"] = ""
+
+                    mutate_jobs(_reset)
+                    # 同步把状态置成"在跑"，窗口期消失，再启动线程
+                    SEND_STATE["running"] = True
+                    SEND_STATE["stop"] = False
+                    SEND_STATE["current"] = ""
+                    SEND_STATE["done"] = 0
+                    SEND_STATE["total"] = len(valid_ids)
+                    SEND_STATE["log"] = []          # 上一轮的日志清掉，别混进来
+                    threading.Thread(target=sender_worker, args=(valid_ids,), daemon=True).start()
+                self._json({"ok": True, "count": len(valid_ids)})
             elif path == "/api/stop":
                 SEND_STATE["stop"] = True
                 self._json({"ok": True})
@@ -1542,8 +1777,60 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": False, "error": str(e)}, 500)
 
 
+LOCK_FILE = os.path.join(DATA_DIR, "app.lock")
+
+
+def acquire_instance_lock():
+    """保证同时只有一个软件在跑。
+
+    为什么需要：以前双击两次 Start.bat 会开两个软件，它们共用同一份 data 目录，
+    互相覆盖数据、而且两边都能点"开始投递" —— 同一批邮件发两遍。
+    拿不到锁就返回 None（说明已经有一个在跑了）。
+    """
+    f = open(LOCK_FILE, "a+", encoding="utf-8")
+    try:
+        if os.name == "nt":
+            import msvcrt
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        f.close()
+        return None
+    return f
+
+
+def read_running_port():
+    """已经有一个在跑的话，从锁文件里读出它开的端口，好把浏览器指过去。"""
+    try:
+        with open(LOCK_FILE, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line.isdigit():
+                    return int(line)
+    except OSError:
+        pass
+    return None
+
+
 def main():
-    init_dirs()
+    os.makedirs(DATA_DIR, exist_ok=True)       # 先建目录，锁文件要放里面
+    lock = acquire_instance_lock()
+    if lock is None:
+        port = read_running_port() or 8765
+        url = "http://127.0.0.1:%d" % port
+        print("=" * 50)
+        print("  软件已经在运行了，不用再开一个。")
+        print("  正在给你打开已有的那个窗口：%s" % url)
+        print("  如果浏览器没反应，就手动复制上面这个网址打开。")
+        print("=" * 50)
+        webbrowser.open(url)
+        time.sleep(1.5)
+        return
+
+    init_dirs()                                # 确认只有自己在跑，才动数据目录
     server = None
     port = 8765
     for p in (8765, 8766, 8767, 8768):
@@ -1556,6 +1843,13 @@ def main():
     if server is None:
         print("错误：8765-8768 端口都被占用，无法启动")
         return
+    try:
+        lock.seek(0)
+        lock.truncate()
+        lock.write("%d\n" % port)
+        lock.flush()
+    except OSError:
+        pass
     url = "http://127.0.0.1:%d" % port
     print("=" * 50)
     print("  简历批量投递助手 已启动")

@@ -856,6 +856,7 @@
         <button class="btn" onclick="document.getElementById('sheetFile').click()">📂 打开 Excel 文件</button>
         <button class="btn" onclick="sheetAddRows()">＋ 加 20 行</button>
         <button class="btn" id="sheetUndoBtn" onclick="sheetUndo()" title="撤回上一步改动（Ctrl+Z 也行）">↶ 撤销</button>
+        <button class="btn" id="sheetRedoBtn" onclick="sheetRedo()" title="把刚撤掉的做回来（Ctrl+Y 也行）">↷ 重做</button>
         <button class="btn danger" onclick="sheetClear()">清空表格</button>
       </div>
       <div class="sheet-wrap" id="sheetWrap"></div>
@@ -2270,27 +2271,33 @@ const SHEET_COL_CN = ["公司", "岗位", "收件邮箱", "备注"];
 const SHEET_COL_LETTER = ["A", "B", "C", "D"];
 let SHEET = [], SHEET_ROWS = 40, SEL = null, sheetDragging = false, saveTimer = null, lastSelKey = "";
 /* 表格的"反悔"记录：每次要整块动内容之前先存一份当时的表，撤销就倒回去。
-   最多留 25 步，够用，也不占内存。 */
-let SHEET_UNDO = [], SHEET_EDIT_KEY = "";
-const SHEET_UNDO_MAX = 25;
+   撤多了还能"重做"再回来 —— 撤掉的每一步都会进重做栈，直到你又开始动手改（那重做就作废了，
+   跟所有编辑器一个规矩）。两边各留 100 步，够用，也不占内存（存的是浅拷贝，文字还是同一份）。 */
+let SHEET_UNDO = [], SHEET_REDO = [], SHEET_EDIT_KEY = "";
+const SHEET_UNDO_MAX = 100;
 
 function blankSheet(n) { return Array.from({ length: n }, () => Array(SHEET_COLS).fill("")); }
 function colName(c) { return SHEET_COL_LETTER[c] || ("第" + (c + 1) + "列"); }
 function pushSheetUndo(label) {
   SHEET_UNDO.push({ label: label || "改动", rows: SHEET.map(r => r.slice()), rowsN: SHEET_ROWS });
   if (SHEET_UNDO.length > SHEET_UNDO_MAX) SHEET_UNDO.shift();
+  SHEET_REDO = [];                     // 又动手改了，之前撤掉的那些就不该再"重做"回来
   updateSheetUndoBtn();
 }
 function updateSheetUndoBtn() {
-  const b = $("#sheetUndoBtn");
-  if (!b) return;
-  b.disabled = !SHEET_UNDO.length;
-  b.style.opacity = SHEET_UNDO.length ? "" : ".5";
-  b.textContent = SHEET_UNDO.length ? `↶ 撤销（${SHEET_UNDO.length}）` : "↶ 撤销";
+  const u = $("#sheetUndoBtn"), d = $("#sheetRedoBtn");
+  if (u) {
+    u.disabled = !SHEET_UNDO.length;
+    u.style.opacity = SHEET_UNDO.length ? "" : ".5";
+    u.textContent = SHEET_UNDO.length ? `↶ 撤销（${SHEET_UNDO.length}）` : "↶ 撤销";
+  }
+  if (d) {
+    d.disabled = !SHEET_REDO.length;
+    d.style.opacity = SHEET_REDO.length ? "" : ".5";
+    d.textContent = SHEET_REDO.length ? `↷ 重做（${SHEET_REDO.length}）` : "↷ 重做";
+  }
 }
-function sheetUndo() {
-  const st = SHEET_UNDO.pop();
-  if (!st) return toast("没有可以撤销的改动了", false);
+function applySheetSnap(st) {
   SHEET_ROWS = st.rowsN;
   SHEET = st.rows.map(r => r.slice());
   while (SHEET.length < SHEET_ROWS) SHEET.push(Array(SHEET_COLS).fill(""));
@@ -2298,7 +2305,23 @@ function sheetUndo() {
   renderSheet();
   queueSheetSave();
   updateSheetUndoBtn();
+}
+function sheetUndo() {
+  if (!SHEET_UNDO.length) return toast("没有可以撤销的改动了", false);
+  const st = SHEET_UNDO.pop();
+  // 先把自己这会儿的样子存进重做栈，撤多了才能倒回来
+  SHEET_REDO.push({ label: st.label, rows: SHEET.map(r => r.slice()), rowsN: SHEET_ROWS });
+  if (SHEET_REDO.length > SHEET_UNDO_MAX) SHEET_REDO.shift();
+  applySheetSnap(st);
   toast("已撤销：" + st.label);
+}
+function sheetRedo() {
+  if (!SHEET_REDO.length) return toast("没有可以重做的了", false);
+  const st = SHEET_REDO.pop();
+  SHEET_UNDO.push({ label: st.label, rows: SHEET.map(r => r.slice()), rowsN: SHEET_ROWS });
+  if (SHEET_UNDO.length > SHEET_UNDO_MAX) SHEET_UNDO.shift();
+  applySheetSnap(st);
+  toast("已重做：" + st.label);
 }
 
 async function openSheet() {
@@ -2318,7 +2341,7 @@ async function openSheet() {
     (line || []).forEach((v, c) => { if (c < SHEET_COLS) SHEET[r][c] = v == null ? "" : String(v); });
   });
   SEL = null; lastSelKey = "";
-  SHEET_UNDO = []; SHEET_EDIT_KEY = "";     // 换一张表，之前的撤销记录就不作数了
+  SHEET_UNDO = []; SHEET_REDO = []; SHEET_EDIT_KEY = "";   // 换一张表，之前的撤销/重做记录就不作数了
   renderSheet();
   updateSheetUndoBtn();
   if (rows.length && loaded && loaded.updated_at) {
@@ -2391,7 +2414,8 @@ function updateSheetFoot() {
   if (!s) {
     el.innerHTML = `还没框选。用鼠标在表格里<b>拖一块区域</b>（比如只拖左边三列），再点右下角「✅ 导入选中区域」。<br>
       <span class="hint">单击格子 = 选中它（直接打字就能覆盖）；<b>再单击一下</b> = 把光标点到字中间改字。
-      选中一格或拖住一块之后：<b>Ctrl+C</b> 复制、<b>Ctrl+V</b> 粘贴、<b>Delete</b> 清空、<b>Esc</b> 退出编辑态（之后方向键挪格子）。</span>`;
+      选中一格或拖住一块之后：<b>Ctrl+C</b> 复制、<b>Ctrl+V</b> 粘贴、<b>Delete</b> 清空；
+      改错了用 <b>Ctrl+Z</b> 撤销、<b>Ctrl+Y</b> 重做（各 100 步），<b>Esc</b> 退出编辑态（之后方向键挪格子）。</span>`;
     return;
   }
   const rows = s.r2 - s.r1 + 1, cols = s.c2 - s.c1 + 1;
@@ -2406,7 +2430,7 @@ function updateSheetFoot() {
   el.innerHTML = `已框选 <b>${colName(s.c1)}${s.r1 + 1} : ${colName(s.c2)}${s.r2 + 1}</b>` +
     `（${cols} 列 × ${rows} 行，有内容的 ${filled} 行）　${map.join("　·　")}` +
     (hasAt ? "" : `　<span class="bad">⚠ 这块里没看到邮箱（没有带 @ 的内容），把收件邮箱那一列也框进来</span>`) +
-    `　<span class="hint">Ctrl+C 复制 · Ctrl+V 粘贴 · Delete 清空 · Esc 退出编辑态</span>`;
+    `　<span class="hint">Ctrl+C 复制 · Ctrl+V 粘贴 · Delete 清空 · Ctrl+Z 撤销 · Ctrl+Y 重做 · Esc 退出编辑态</span>`;
 }
 function fillCells(r0, c0, data) {
   let maxC = 0;
@@ -2593,11 +2617,15 @@ function sheetPaste(text) {
 function sheetClearSel() {
   const s = normSel();
   if (!s) return 0;
-  pushSheetUndo("清空 " + ((s.r2 - s.r1 + 1) * (s.c2 - s.c1 + 1)) + " 个格子");
+  // 先数一下有没有内容：本来就空的就别留撤销记录了（不然会把"重做"白白冲掉）
   let n = 0;
+  for (let r = s.r1; r <= s.r2; r++)
+    for (let c = s.c1; c <= s.c2; c++)
+      if (SHEET[r][c]) n++;
+  if (!n) return 0;
+  pushSheetUndo("清空 " + n + " 个格子");
   for (let r = s.r1; r <= s.r2; r++) {
     for (let c = s.c1; c <= s.c2; c++) {
-      if (SHEET[r][c]) n++;
       SHEET[r][c] = "";
       const el = document.querySelector(`.sg-input[data-r="${r}"][data-c="${c}"]`);
       if (el) el.value = "";
@@ -2605,7 +2633,6 @@ function sheetClearSel() {
   }
   queueSheetSave();
   updateSheetFoot();
-  if (!n) { SHEET_UNDO.pop(); updateSheetUndoBtn(); }   // 本来就没内容，不留这一步撤销记录
   return n;
 }
 /* 不是编辑态时，方向键挪选中的格子（Excel 里也是这么走的） */
@@ -2657,11 +2684,13 @@ document.addEventListener("keydown", e => {
   const otherEditable = !inCell && a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" ||
                                         a.tagName === "SELECT" || a.isContentEditable);
   if (otherEditable) return;                 // 焦点在标签框之类的地方，别抢键盘
-  // Ctrl+Z 撤回表格里的改动（正在格子里打字时留给浏览器自己撤销这格的字）
-  if (!inCell && (e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) {
-    e.preventDefault();
-    sheetUndo();
-    return;
+  // Ctrl+Z 撤回、Ctrl+Y（或 Ctrl+Shift+Z）做回来。
+  // 正在格子里打字时不抢：那会儿的 Ctrl+Z 留给浏览器撤销这格里的字
+  if (!inCell && (e.ctrlKey || e.metaKey)) {
+    const k = String(e.key || "").toLowerCase();
+    if (k === "z" && e.shiftKey) { e.preventDefault(); sheetRedo(); return; }
+    if (k === "z") { e.preventDefault(); sheetUndo(); return; }
+    if (k === "y") { e.preventDefault(); sheetRedo(); return; }
   }
   if (!SEL) return;
   if (inCell) {

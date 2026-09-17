@@ -805,7 +805,7 @@
       <div class="sheet-bar">
         <span class="hint">列的顺序：<b style="color:#185fa5;">第1列 公司</b> · <b style="color:#185fa5;">第2列 岗位</b> · <b style="color:#185fa5;">第3列 收件邮箱</b> · <b style="color:#185fa5;">第4列 备注</b><span style="color:#c0c4cc;">（备注可空；第5列往后用不到）</span></span>
         <span class="spacer"></span>
-        <input type="file" id="sheetFile" accept=".xlsx,.xls" style="display:none;">
+        <input type="file" id="sheetFile" accept=".xlsx" style="display:none;">
         <button class="btn" onclick="document.getElementById('sheetFile').click()">📂 打开 Excel 文件</button>
         <button class="btn" onclick="sheetAddRows()">＋ 加 20 行</button>
         <button class="btn danger" onclick="sheetClear()">清空表格</button>
@@ -826,7 +826,7 @@
   </div>
 </div>
 
-<input type="file" id="importInput" accept=".xlsx,.xls" style="display:none;">
+<input type="file" id="importInput" accept=".xlsx" style="display:none;">
 <div id="toast"></div>
 
 <script>
@@ -2266,7 +2266,7 @@ $("#sheetFile").onchange = async e => {
       !confirm("表格里已经有内容了，用这个 Excel 文件的内容覆盖掉？")) return;
   const b64 = await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result.split(",")[1]); fr.readAsDataURL(f); });
   const r = await api("/api/sheet/parse", { data: b64 });
-  if (!r.ok) return toast(r.error, false);
+  if (!r || !r.ok) return toast((r && r.error) || "这个文件读不出来", false);
   const data = (r.rows || []).map(line => line.slice(0, SHEET_COLS));
   while (data.length && !data[data.length - 1].some(v => v && String(v).trim())) data.pop();
   if (!data.length) return toast("这个文件里没读到内容", false);
@@ -2275,7 +2275,15 @@ $("#sheetFile").onchange = async e => {
   const res = fillCells(0, 0, data);
   renderSheet();
   sheetSaveNow();
-  toast(`已把 Excel 的 ${res.rows} 行铺进表格${res.dropped ? "（只取了前 4 列）" : ""}，检查/改完再框选导入`);
+  const more = res.dropped ? "（只取了前 4 列）" : "";
+  toast(`已把 Excel 的 ${res.rows} 行铺进表格${more}，检查/改完再框选导入`);
+  // 超过上限时以前是静默丢的：按 450 家准备、实际只铺进来 400 家，谁都不知道
+  if (r.truncated) {
+    setTimeout(() => alert(`注意：这个文件一共 ${r.total} 行，但表格最多只能铺 ${r.limit} 行，` +
+                           `只铺了前 ${r.limit} 行，剩下 ${r.total - r.limit} 行没进来。\n\n` +
+                           `想让全部 ${r.total} 行直接进清单，别用这张表 —— 关掉它，` +
+                           `在「投递清单」页点「📂 导入 Excel」，那条路没有行数上限。`), 200);
+  }
 };
 
 /* ---------- init ---------- */

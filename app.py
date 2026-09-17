@@ -277,8 +277,29 @@ def save_templates(tpls):
 
 
 def get_jobs():
+    """读清单。顺手把"结构不对的项"挡在外面。
+
+    文件被手改坏、磁盘出问题时，里面可能混进字符串之类的元素；
+    留着它们，投递、打标签、导出、在线填表会一起报错，报的还是
+    'str' object has no attribute 'get' 这种谁也看不懂的话。
+    """
     jobs = load_json("jobs.json", [])
-    return jobs if isinstance(jobs, list) else []
+    if not isinstance(jobs, list):
+        return []
+    good = [j for j in jobs if isinstance(j, dict)]
+    if len(good) != len(jobs):
+        _warn("清单文件里有 %d 项的内容不对（不是一条投递记录），已经忽略掉。"
+              "要确认的话看看 data 目录里有没有 .corrupt- 备份文件。"
+              % (len(jobs) - len(good)))
+    return good
+
+
+def get_sent_log():
+    """读投递记录，同样只保留结构正确的条目。"""
+    logs = load_json("sent_log.json", [])
+    if not isinstance(logs, list):
+        return []
+    return [e for e in logs if isinstance(e, dict)]
 
 
 def save_jobs(jobs):
@@ -321,6 +342,23 @@ def find_job(jid):
     return None
 
 
+def new_job_id(taken=()):
+    """给清单条目起个 id。
+
+    以前直接用毫秒时间戳，同一毫秒内连着建两条就会撞成同一个 id，
+    两条记录从此"你改它、它动"（按 id 找条目会永远找到第一条）。
+    这里撞了就往后顺延，保证不重复。
+    """
+    taken = {str(x) for x in taken}
+    base = int(time.time() * 1000)
+    cand = "j%d" % base
+    i = 1
+    while cand in taken:
+        cand = "j%d_%d" % (base, i)
+        i += 1
+    return cand
+
+
 def jobs_stamp():
     """清单文件的改动时间。网页轮询时拿它比较，只有真变了才重画表格
     （不然每 2.5 秒重画一次，会把你正在填的那个格子打断）。"""
@@ -332,18 +370,13 @@ def jobs_stamp():
 
 def today_sent_count():
     today = datetime.now().strftime("%Y-%m-%d")
-    logs = load_json("sent_log.json", [])
-    if not isinstance(logs, list):
-        return 0
-    return sum(1 for e in logs
-               if isinstance(e, dict) and str(e.get("sent_at", "")).startswith(today) and e.get("ok"))
+    return sum(1 for e in get_sent_log()
+               if str(e.get("sent_at", "")).startswith(today) and e.get("ok"))
 
 
 def append_sent_log(entry):
     with DATA_LOCK:
-        logs = load_json("sent_log.json", [])
-        if not isinstance(logs, list):
-            logs = []
+        logs = get_sent_log()
         logs.append(entry)
         save_json("sent_log.json", logs)
 
@@ -534,7 +567,9 @@ def merge_move(fid, direction):
     a, b = ids[i], ids[j]
     seq_a, name_a = a.split("__", 1)
     seq_b, name_b = b.split("__", 1)
-    tmp = os.path.join(MERGE_DIR, "000__swap.tmp")
+    # 中转文件名故意不带 "__"：万一挪到一半崩了，这个残留文件也不会被
+    # 当成"待合并的文件"列进界面（以前会冒出一条叫 swap.tmp、格式不认识的条目）
+    tmp = os.path.join(MERGE_DIR, "_swap.tmp")
     os.replace(os.path.join(MERGE_DIR, a), tmp)
     os.replace(os.path.join(MERGE_DIR, b), os.path.join(MERGE_DIR, seq_a + "__" + name_b))
     os.replace(tmp, os.path.join(MERGE_DIR, seq_b + "__" + name_a))
@@ -558,6 +593,13 @@ def merge_clear():
             os.remove(os.path.join(MERGE_DIR, stored))
         except OSError:
             pass
+    for junk in ("_swap.tmp", "000__swap.tmp"):        # 顺手清掉以前中断留下的中转文件
+        p = os.path.join(MERGE_DIR, junk)
+        if os.path.isfile(p):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
 
 
 def render_image_page(path):
@@ -1064,6 +1106,25 @@ def excel_export_bytes():
     return buf.getvalue()
 
 
+def load_xlsx(b64_data):
+    """把上传的 Excel 读成 openpyxl 的工作簿。读不了的翻成人话再抛。
+
+    最常见的一种：老版 Excel（.xls）。openpyxl 只认 .xlsx，
+    直接抛的话用户看到的是「File is not a zip file」这种英文天书。
+    """
+    from openpyxl import load_workbook
+    raw = base64.b64decode(b64_data)
+    if raw[:4] == b"\xd0\xcf\x11\xe0":       # 老 .xls 的文件头（OLE2 复合文档）
+        raise ValueError("这是老版 Excel 格式（.xls），这个软件读不了。"
+                         "请在 Excel 里点「文件 → 另存为」，选 .xlsx 格式存一份，再导这个新的。")
+    if raw[:2] != b"PK":                      # 正常的 .xlsx 是个 zip
+        raise ValueError("这个文件不是 Excel 表格（.xlsx）。确认一下是不是选错文件了。")
+    try:
+        return load_workbook(io.BytesIO(raw), data_only=True)
+    except Exception as e:
+        raise ValueError("这个 Excel 读不出来（文件可能坏了，或者带密码）：%s" % e)
+
+
 def _cell_text(v):
     """把 Excel 单元格的值变成纯文字。日期单独处理，不然会读成 2026-09-16 00:00:00。"""
     if v is None:
@@ -1103,7 +1164,7 @@ def _append_job(jobs, existing, company, position, email, note, tags,
         return "dup"
     existing.add(key)
     jobs.append({
-        "id": "j%d%03d" % (int(time.time() * 1000), len(jobs) % 1000),
+        "id": new_job_id(x.get("id") for x in jobs if isinstance(x, dict)),
         "company": company, "position": position, "email": email, "note": note,
         "tags": list(tags or []),
         "template_id": str(template_id or ""),
@@ -1125,10 +1186,7 @@ def excel_import(b64_data, tags=None):
 
     tags 会打给这一批新导入的条目（可为空）。
     """
-    from openpyxl import load_workbook
-    raw = base64.b64decode(b64_data)
-    wb = load_workbook(io.BytesIO(raw), data_only=True)
-    ws = wb.active
+    ws = load_xlsx(b64_data).active
 
     header_map = {}
     for cell in ws[1]:
@@ -1268,17 +1326,22 @@ def sheet_save(rows):
 
 
 def parse_xlsx(b64_data):
-    """把 Excel 文件读成一张纯文字的二维表，铺进网页里的在线表格让你看/改。"""
-    from openpyxl import load_workbook
-    raw = base64.b64decode(b64_data)
-    wb = load_workbook(io.BytesIO(raw), data_only=True)
-    ws = wb.active
+    """把 Excel 文件读成一张纯文字的二维表，铺进网页里的在线表格让你看/改。
+
+    返回 (铺好的行, 原文件总行数)。总行数要带回去，好在前端提醒"只铺了前 400 行"——
+    以前超过 400 行是静默截断的，用户按 450 家准备、实际只铺进来 400 家。
+    """
+    ws = load_xlsx(b64_data).active
     rows = []
     for r in ws.iter_rows(max_row=SHEET_MAX_ROWS):
         rows.append([_cell_text(c.value) for c in r[:SHEET_MAX_COLS]])
     while rows and not any(rows[-1]):
         rows.pop()                                     # 去掉末尾的空行
-    return rows
+    try:
+        total = int(ws.max_row or len(rows))
+    except Exception:
+        total = len(rows)
+    return rows, max(total, len(rows))
 
 
 # ---------------------------------------------------------------- HTTP 服务
@@ -1368,13 +1431,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._preview((qs.get("src") or ["att"])[0], (qs.get("name") or [""])[0])
             elif path == "/api/logs":
                 # 投递记录页：全量发送记录，最新的排最前
-                logs = load_json("sent_log.json", [])
-                if not isinstance(logs, list):
-                    logs = []
+                logs = get_sent_log()
                 self._json({"ok": True, "logs": list(reversed(logs))})
             elif path == "/api/jobs/history":
                 jid = (qs.get("id") or [""])[0]
-                logs = [e for e in load_json("sent_log.json", []) if e.get("id") == jid]
+                logs = [e for e in get_sent_log() if e.get("id") == jid]
                 logs.reverse()
                 self._json({"ok": True, "logs": logs})
             elif path == "/api/state":
@@ -1565,7 +1626,6 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/jobs/add":
                 job_tags, tags_dropped = split_tags(body.get("tags"))
                 job = {
-                    "id": "j%d" % int(time.time() * 1000),
                     "company": str(body.get("company", "")).strip(),
                     "position": str(body.get("position", "")).strip(),
                     "email": norm_email(body.get("email", "")),
@@ -1584,7 +1644,13 @@ class Handler(BaseHTTPRequestHandler):
                 if bad:
                     self._json({"ok": False, "error": bad})
                     return
-                mutate_jobs(lambda jobs: jobs.append(job))
+
+                def _add(jobs):
+                    # id 在锁里现算，跟磁盘上已有的对照过，同毫秒也不会撞
+                    job["id"] = new_job_id(x.get("id") for x in jobs if isinstance(x, dict))
+                    jobs.append(job)
+
+                mutate_jobs(_add)
                 self._json({"ok": True, "job": job, "tags_dropped": tags_dropped})
             elif path == "/api/jobs/update":
                 jid = body.get("id")
@@ -1679,8 +1745,9 @@ class Handler(BaseHTTPRequestHandler):
                 rows = sheet_save(body.get("rows"))
                 self._json({"ok": True, "rows": rows})
             elif path == "/api/sheet/parse":
-                rows = parse_xlsx(body.get("data", ""))
-                self._json({"ok": True, "rows": rows})
+                rows, total = parse_xlsx(body.get("data", ""))
+                self._json({"ok": True, "rows": rows, "total": total,
+                            "limit": SHEET_MAX_ROWS, "truncated": total > SHEET_MAX_ROWS})
             elif path == "/api/sheet/import":
                 result = import_rows(body.get("rows") or [], body.get("tags"))
                 self._json({"ok": True, **result, "all_tags": tag_all()})

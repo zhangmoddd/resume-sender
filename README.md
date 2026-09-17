@@ -196,6 +196,8 @@ pdf_merge_gui.py    独立的 PDF / 图片 合并工具（可选，功能比网�
 合并PDF.bat         启动上面那个独立工具
 data/               运行数据（已排除在 Git 之外）
 attachments/        附件库（已排除在 Git 之外）
+tests/              自动化回归测试。改了「在线填表」的撤销/重做代码后，跑一下
+                    `python tests/test_sheet_undo.py`，它会现从 index.html 抽函数来测
 ```
 
 ---

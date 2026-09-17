@@ -2299,8 +2299,16 @@ function updateSheetUndoBtn() {
 }
 function applySheetSnap(st) {
   SHEET_ROWS = st.rowsN;
-  SHEET = st.rows.map(r => r.slice());
+  SHEET = st.rows.slice(0, st.rowsN).map(r => r.slice());
   while (SHEET.length < SHEET_ROWS) SHEET.push(Array(SHEET_COLS).fill(""));
+  // 撤销可能把行数也撤少了（比如把"粘贴撑大的 60 行"撤回 40 行）。
+  // 框选区要是还落在被撤掉的那些行上，"已框选"那块就会去读一个不存在的行、直接报错 ——
+  // 所以这里把选区往回收进有效范围。
+  if (SEL) {
+    const maxR = SHEET_ROWS - 1;
+    SEL.r1 = Math.max(0, Math.min(SEL.r1, maxR));
+    SEL.r2 = Math.max(0, Math.min(SEL.r2, maxR));
+  }
   SHEET_EDIT_KEY = "";
   renderSheet();
   queueSheetSave();
@@ -2421,8 +2429,9 @@ function updateSheetFoot() {
   const rows = s.r2 - s.r1 + 1, cols = s.c2 - s.c1 + 1;
   let filled = 0, hasAt = false;
   for (let r = s.r1; r <= s.r2; r++) {
-    const seg = SHEET[r].slice(s.c1, s.c2 + 1);
-    if (seg.some(v => v && v.trim())) filled++;
+    const row = SHEET[r] || [];            // 行数被撤销改小的时候，别去读不存在的行
+    const seg = row.slice(s.c1, s.c2 + 1);
+    if (seg.some(v => v && String(v).trim())) filled++;
     if (seg.some(v => (v || "").includes("@"))) hasAt = true;
   }
   const map = [];

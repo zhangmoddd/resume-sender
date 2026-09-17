@@ -752,6 +752,56 @@ def merge_run(out_name):
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+def norm_atts(v):
+    """把附件名单统一成文件名列表。
+
+    以前是把传进来的东西直接当列表迭代 —— 传个字符串会被按字拆开
+    （"不是列表" → ['不','是','列','表']），这条从此发不出去，还报一串看不懂的文件名。
+    """
+    if v is None:
+        return []
+    if isinstance(v, str):
+        v = re.split(r"[,，、;\n|]+", v)
+    if not isinstance(v, (list, tuple, set)):
+        return []
+    out = []
+    for x in v:
+        s = str(x).strip()
+        if s and s not in out:
+            out.append(s)
+    return out
+
+
+def norm_email(v):
+    """收件邮箱去掉所有空白字符。
+
+    Excel 单元格里粘进来的邮箱可能带换行（Alt+Enter），带着换行发信会被邮件库
+    直接判成"头部里藏了别的头"，用户只会看到一串看不懂的英文报错。
+    """
+    return re.sub(r"\s+", "", str(v or ""))
+
+
+# 这些字符不可能出现在一个正常邮箱里，出现就是粘错了东西
+EMAIL_BAD_CHARS = ':",;<>[]()\\'
+
+
+def email_problem(v):
+    """检查收件邮箱能不能用，没问题返回 ""，有问题返回一句人话。
+
+    单独抽出来是因为"格式不对"以前只在界面上用一句 "要有 @" 糊过去，
+    从 Excel 导进来的怪邮箱则一路留到发信时才炸，报的还是英文底层错误。
+    """
+    e = norm_email(v)
+    if not e:
+        return "收件邮箱是空的"
+    if "@" not in e or e.startswith("@") or e.endswith("@"):
+        return "收件邮箱格式不对（%s）" % e[:40]
+    bad = sorted({c for c in e if c in EMAIL_BAD_CHARS})
+    if bad:
+        return "收件邮箱里有不该出现的字符「%s」（%s）" % ("".join(bad), e[:40])
+    return ""
+
+
 def resolve_attachments(job):
     """按投递目标解析附件：atts 为空 -> 发全部附件；否则只发勾选的（按勾选顺序）。"""
     chosen = [str(x) for x in ((job or {}).get("atts") or [])]
@@ -813,12 +863,14 @@ def build_message(job, cfg, tpls):
 
 
 def send_one(job, cfg, tpls):
-    email = str(job.get("email") or "").strip()
-    if "@" not in email or email.startswith("@") or email.endswith("@"):
-        return False, "这一条的收件邮箱不对（%s），先在清单里改好" % (email or "空着"), "", ""
+    bad = email_problem(job.get("email"))
+    if bad:
+        return False, "这一条发不了：%s，先在清单里改好" % bad, "", ""
     try:
         msg, subject, tpl_name = build_message(job, cfg, tpls)
-        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=30) as s:
+        # 90 秒：附件大的时候上传本身就要几十秒。超时太短的话，
+        # 邮件可能已经送出去了、这边却记成"失败"，你再重投就会发两遍。
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=90) as s:
             s.login(cfg.get("email", ""), cfg.get("auth_code", ""))
             s.send_message(msg)
         return True, "", subject, tpl_name
@@ -862,20 +914,31 @@ def _interruptible_sleep(seconds):
         time.sleep(0.5)
 
 
+def int_setting(cfg, key, default):
+    """读一个"应该是数字"的设置。配置里被手改成了空字符串/文字也不会炸。"""
+    try:
+        return int(cfg.get(key, default))
+    except (TypeError, ValueError):
+        return default
+
+
 def sender_worker(job_ids):
     """后台一封封发。
 
     注意：这里**不再**一次性把整份清单读进内存然后整份写回。
     每发一封都重新从磁盘读这一条（用户刚删掉的就不会再发），
     只改这一条的几个字段再写回 —— 这样你在网页上改进展、备注、标签都不会被盖掉。
-    """
-    cfg = get_config()
-    tpls = get_templates()
-    interval = max(MIN_SEND_INTERVAL, int(cfg.get("interval", 40)))
-    daily_limit = int(cfg.get("daily_limit", 50))
-    log_add("开始投递，共 %d 封，每封间隔 %d 秒" % (len(job_ids), interval))
 
+    整个函数体都包在 try 里：读设置、算间隔这些"开头几步"以前写在 try 外面，
+    配置里数字一坏，线程会在还没进循环时就死掉 —— 而 running 已经被置成 True，
+    于是界面永远显示"投递中"、再点开始还会被自己拦下，只能重启软件。
+    """
     try:
+        cfg = get_config()
+        tpls = get_templates()
+        interval = max(MIN_SEND_INTERVAL, int_setting(cfg, "interval", 40))
+        daily_limit = max(1, int_setting(cfg, "daily_limit", 50))
+        log_add("开始投递，共 %d 封，每封间隔 %d 秒" % (len(job_ids), interval))
         for idx, jid in enumerate(job_ids):
             if SEND_STATE["stop"]:
                 log_add("已手动停止", "err")
@@ -1034,6 +1097,7 @@ def _looks_like_header(vals):
 def _append_job(jobs, existing, company, position, email, note, tags,
                 progress="", event_date="", mynote="", template_id=""):
     """把一行数据变成清单条目。返回 "added"（新增）或 "dup"（重复，跳过）。"""
+    email = norm_email(email)          # Excel 里粘来的邮箱可能带换行，先清干净
     key = (email, position, company)
     if key in existing:
         return "dup"
@@ -1111,8 +1175,8 @@ def excel_import(b64_data, tags=None):
             note = vals.get("note", "")
             if not company and not position and not email and not note:
                 continue                               # 整行空着，跳过
-            if "@" not in email:
-                bad += 1                               # 没有邮箱，发不了，算无效
+            if email_problem(email):
+                bad += 1                               # 没有邮箱或格式不对，发不了，算无效
                 continue
             # 「投递定位」那一列：写模板名字；写「默认」或留空就跟随默认那套
             tname = (vals.get("template") or "").strip()
@@ -1159,7 +1223,7 @@ def import_rows(rows, tags=None):
             company, position, email, note = vals
             if not any(vals):
                 continue
-            if "@" not in email:
+            if email_problem(email):
                 bad += 1
                 continue
             r = _append_job(jobs, existing, company, position, email, note, tags)
@@ -1477,7 +1541,7 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/preview":
                 job_id = body.get("job_id", "")
                 jobs = get_jobs()
-                job = next((j for j in jobs if j["id"] == job_id), None)
+                job = next((j for j in jobs if j.get("id") == job_id), None)
                 if not job:
                     job = jobs[0] if jobs else {"company": "示例科技", "position": "后端开发",
                                                 "email": "hr@example.com", "note": "",
@@ -1504,25 +1568,31 @@ class Handler(BaseHTTPRequestHandler):
                     "id": "j%d" % int(time.time() * 1000),
                     "company": str(body.get("company", "")).strip(),
                     "position": str(body.get("position", "")).strip(),
-                    "email": str(body.get("email", "")).strip(),
+                    "email": norm_email(body.get("email", "")),
                     "note": str(body.get("note", "")).strip(),
                     "tags": job_tags,
                     "template_id": str(body.get("template_id") or "").strip(),
                     "subject_override": str(body.get("subject_override", "")).strip(),
                     "body_override": str(body.get("body_override", "")),
-                    "atts": [str(a) for a in (body.get("atts") or [])],
+                    "atts": norm_atts(body.get("atts")),
                     "progress": str(body.get("progress", "")).strip() or "未回音",
                     "event_date": str(body.get("event_date", "")).strip(),
                     "mynote": str(body.get("mynote", "")),
                     "status": "待发", "error": "", "sent_at": "",
                 }
-                if "@" not in job["email"]:
-                    self._json({"ok": False, "error": "收件邮箱格式不正确"})
+                bad = email_problem(job["email"])
+                if bad:
+                    self._json({"ok": False, "error": bad})
                     return
                 mutate_jobs(lambda jobs: jobs.append(job))
                 self._json({"ok": True, "job": job, "tags_dropped": tags_dropped})
             elif path == "/api/jobs/update":
                 jid = body.get("id")
+                if "email" in body:
+                    bad = email_problem(body.get("email"))
+                    if bad:
+                        self._json({"ok": False, "error": bad})
+                        return
                 tags_dropped = 0
                 found = []
 
@@ -1533,7 +1603,7 @@ class Handler(BaseHTTPRequestHandler):
                     for k in ("company", "position", "email", "note", "subject_override",
                               "event_date", "template_id"):
                         if k in body:
-                            j[k] = str(body[k]).strip()
+                            j[k] = norm_email(body[k]) if k == "email" else str(body[k]).strip()
                     for k in ("body_override", "mynote"):
                         if k in body:
                             j[k] = str(body[k])
@@ -1541,7 +1611,7 @@ class Handler(BaseHTTPRequestHandler):
                         v = str(body["progress"]).strip()
                         j["progress"] = v if v in ("未回音", "笔试", "面试", "Offer", "挂了", "我放弃") else "未回音"
                     if "atts" in body:
-                        j["atts"] = [str(a) for a in (body.get("atts") or [])]
+                        j["atts"] = norm_atts(body.get("atts"))
                     if "tags" in body:
                         new_tags, tags_dropped = split_tags(body.get("tags"))
                         j["tags"] = new_tags
@@ -1778,6 +1848,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 LOCK_FILE = os.path.join(DATA_DIR, "app.lock")
+APP_PORTS = (8765, 8766, 8767, 8768)      # 8765 被占就顺着往后试
 
 
 def acquire_instance_lock():
@@ -1803,7 +1874,7 @@ def acquire_instance_lock():
 
 
 def read_running_port():
-    """已经有一个在跑的话，从锁文件里读出它开的端口，好把浏览器指过去。"""
+    """从锁文件里读出那个实例开的端口（Linux/macOS 上能用；Windows 上读不到，见下面）。"""
     try:
         with open(LOCK_FILE, "r", encoding="utf-8") as f:
             for line in f:
@@ -1815,11 +1886,35 @@ def read_running_port():
     return None
 
 
+def find_running_instance():
+    """挨个端口问一句"你是谁"，认出正在跑的本软件。
+
+    为什么不靠锁文件里的端口号：Windows 上锁文件第 0 个字节被 msvcrt 上了锁，
+    别的进程去读会直接 PermissionError（同一个进程开第二个句柄都读不出来），
+    结果永远回落到 8765 —— 万一 8765 被别的程序占着、主实例退到了 8766，
+    再双击 Start.bat 就会把别人家的网页打开。
+    """
+    import http.client
+    for p in APP_PORTS:
+        try:
+            c = http.client.HTTPConnection("127.0.0.1", p, timeout=1.5)
+            c.request("GET", "/api/state")
+            r = c.getresponse()
+            server = str(r.getheader("Server") or "")
+            r.read(64)
+            c.close()
+        except Exception:
+            continue
+        if server.startswith("ResumeSender/"):
+            return p
+    return None
+
+
 def main():
     os.makedirs(DATA_DIR, exist_ok=True)       # 先建目录，锁文件要放里面
     lock = acquire_instance_lock()
     if lock is None:
-        port = read_running_port() or 8765
+        port = find_running_instance() or read_running_port() or APP_PORTS[0]
         url = "http://127.0.0.1:%d" % port
         print("=" * 50)
         print("  软件已经在运行了，不用再开一个。")
@@ -1832,8 +1927,8 @@ def main():
 
     init_dirs()                                # 确认只有自己在跑，才动数据目录
     server = None
-    port = 8765
-    for p in (8765, 8766, 8767, 8768):
+    port = APP_PORTS[0]
+    for p in APP_PORTS:
         try:
             server = ThreadingHTTPServer(("127.0.0.1", p), Handler)
             port = p

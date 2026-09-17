@@ -701,8 +701,14 @@
       <div class="field"><label>该公司的邮件主题（留空用全局）</label><input id="fSubject" placeholder="例如：应聘-{姓名}-毕业学校-专业"></div>
       <div class="field"><label>该公司的邮件正文（留空用全局）</label><textarea id="fBody" style="height:110px;" placeholder="例如：尊敬的老师：您好！我是{学校}{专业}{姓名}…"></textarea></div>
       <div class="field">
-        <label>该公司要带的附件 <span class="hint">（默认全部附件；像“要求压缩包投递”的公司，只勾它要的那一个即可）</span></label>
+        <label>该公司要带的附件 <span class="hint">（找工作投简历：一般勾上「跟着附件库走」；像"要求压缩包投递"的公司，就取消勾选、只勾它要的那一个）</span></label>
+        <label style="display:flex; align-items:flex-start; gap:8px; font-size:13px; line-height:1.8; margin-bottom:8px; cursor:pointer; font-weight:400;">
+          <input type="checkbox" id="fAttAll" style="margin-top:4px; flex:none;" onchange="syncAttAll()">
+          <span><b style="color:#0c447c;">跟着附件库走</b>（清单里显示「全局」）：附件库里有什么就全带上，<b>以后新上传的也自动带上</b><br>
+            <span class="hint">不勾这一项 = 只发你下面亲手勾的那几个，以后新加的附件不带给这家。</span></span>
+        </label>
         <div class="att-check" id="fAttList"></div>
+        <div class="hint" id="fAttHint" style="margin-top:6px; line-height:1.8;"></div>
         <div class="hint" style="margin-top:4px;">没有附件可选？先到「发送设置」上传简历/成绩单/压缩包。文件名下面的蓝色小标签，就是你在「发送设置」里给这个文件写的备注。</div>
       </div>
     </div>
@@ -1277,9 +1283,29 @@ function openEdit(id) {
   renderEditAtts(j);
   $("#editOverlay").classList.add("show");
 }
+/* 附件勾选。
+   以前这里有个坑：没单独勾过的行（atts 为空 = 跟着附件库走）打开编辑框时是"全部默认打勾"，
+   你只要点一下保存，就把这个打勾结果当成固定名单存回去了 —— 之后新传的附件不会再带给这家，
+   而且悄无声息。现在把"跟着附件库走"做成一个明确的勾选项，两种意思分得清清楚楚。 */
+function syncAttAll() {
+  const all = $("#fAttAll").checked;
+  document.querySelectorAll(".fatt").forEach(c => {
+    c.disabled = all;
+    if (all) c.checked = true;
+  });
+  $("#fAttHint").innerHTML = all
+    ? "✓ 会带上上面全部文件（以后新上传的也自动带上）。想只发其中几个，就把「跟着附件库走」的勾去掉。"
+    : "只发你在上面勾的那几个。以后新上传的附件<b>不会</b>自动带给这家。";
+}
+function chosenAtts() {
+  if ($("#fAttAll").checked) return [];      // 空 = 跟着附件库走
+  return [...document.querySelectorAll(".fatt:checked")].map(c => c.value);
+}
 function renderEditAtts(job) {
   const chosen = (job && job.atts) ? job.atts : [];
   const list = ATTS || [];
+  // atts 为空 = 跟着附件库走；有名单 = 固定只发这几个
+  $("#fAttAll").checked = !chosen.length;
   $("#fAttList").innerHTML = list.length ? list.map(a => {
     const checked = chosen.length ? (chosen.includes(a.name) ? "checked" : "") : "checked";
     return `
@@ -1297,6 +1323,7 @@ function renderEditAtts(job) {
     </label>`;
   }).join("")
     : `<div class="empty" style="padding:14px 0;">附件库为空，请先到「发送设置」上传</div>`;
+  syncAttAll();
 }
 function closeEdit() { $("#editOverlay").classList.remove("show"); }
 async function saveEdit() {
@@ -1306,11 +1333,14 @@ async function saveEdit() {
     template_id: $("#fTemplateSel").value,
     subject_override: $("#fSubject").value, body_override: $("#fBody").value,
     progress: $("#fProgressSel").value, event_date: $("#fEventDate").value, mynote: $("#fMyNote").value,
-    atts: [...document.querySelectorAll(".fatt:checked")].map(c => c.value),
+    atts: chosenAtts(),          // 勾了「跟着附件库走」就是空名单（= 全带，以后新加的也带）
   };
+  data.email = String(data.email || "").replace(/\s+/g, "");   // 邮箱里不该有空格/换行
   if (!data.email.includes("@")) return toast("收件邮箱格式不正确", false);
   const hasAttLib = (ATTS || []).length > 0;
-  if (hasAttLib && !data.atts.length) return toast("至少勾选一个附件（求职邮件要带简历）", false);
+  if (hasAttLib && !data.atts.length && !$("#fAttAll").checked) {
+    return toast("至少勾选一个附件，或者勾上「跟着附件库走」", false);
+  }
   let dropped = 0;
   if (EDIT_ID) {
     const r = await api("/api/jobs/update", { id: EDIT_ID, ...data });
@@ -1505,7 +1535,9 @@ function renderEditTpl(job) {
 }
 function insertVar(v) {
   const el = document.activeElement === $("#tplBody") ? $("#tplBody") : $("#tplSubject");
-  const pos = el.selectionStart || el.value.length;
+  // 注意：光标在开头时 selectionStart 是 0，用 || 会把它当假值、插到末尾去。
+  const ss = el.selectionStart;
+  const pos = (typeof ss === "number" && ss >= 0) ? ss : el.value.length;
   el.value = el.value.slice(0, pos) + v + el.value.slice(pos);
   el.focus(); el.selectionStart = el.selectionEnd = pos + v.length;
   renderPreview();

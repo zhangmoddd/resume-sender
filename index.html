@@ -2294,7 +2294,9 @@ function paintSel(force) {
 function updateSheetFoot() {
   const el = $("#sheetFoot"), s = normSel();
   if (!s) {
-    el.innerHTML = `还没框选。用鼠标在表格里<b>拖一块区域</b>（比如只拖左边三列），再点右下角「✅ 导入选中区域」。`;
+    el.innerHTML = `还没框选。用鼠标在表格里<b>拖一块区域</b>（比如只拖左边三列），再点右下角「✅ 导入选中区域」。<br>
+      <span class="hint">单击格子 = 选中它（直接打字就能覆盖）；<b>再单击一下</b> = 把光标点到字中间改字。
+      选中一格或拖住一块之后：<b>Ctrl+C</b> 复制、<b>Ctrl+V</b> 粘贴、<b>Delete</b> 清空、<b>Esc</b> 退出编辑态（之后方向键挪格子）。</span>`;
     return;
   }
   const rows = s.r2 - s.r1 + 1, cols = s.c2 - s.c1 + 1;
@@ -2308,7 +2310,8 @@ function updateSheetFoot() {
   for (let c = s.c1; c <= s.c2; c++) map.push(`${colName(c)} 列 = ${SHEET_COL_CN[c]}`);
   el.innerHTML = `已框选 <b>${colName(s.c1)}${s.r1 + 1} : ${colName(s.c2)}${s.r2 + 1}</b>` +
     `（${cols} 列 × ${rows} 行，有内容的 ${filled} 行）　${map.join("　·　")}` +
-    (hasAt ? "" : `　<span class="bad">⚠ 这块里没看到邮箱（没有带 @ 的内容），把收件邮箱那一列也框进来</span>`);
+    (hasAt ? "" : `　<span class="bad">⚠ 这块里没看到邮箱（没有带 @ 的内容），把收件邮箱那一列也框进来</span>`) +
+    `　<span class="hint">Ctrl+C 复制 · Ctrl+V 粘贴 · Delete 清空 · Esc 退出编辑态</span>`;
 }
 function fillCells(r0, c0, data) {
   let maxC = 0;
@@ -2401,13 +2404,25 @@ async function importSelection() {
   await loadJobs();
 }
 
-/* 在线填表上的鼠标 / 键盘 / 粘贴 */
+/* 在线填表上的鼠标 / 键盘 / 粘贴 —— 尽量贴 Excel 的习惯：
+   单击 = 选中这一格（整格全选，可以直接打字覆盖）；
+   已经选中了再单击 = 把光标点到字中间（以前这里点了没反应，只能按方向键）；
+   按住拖 = 框选一块；框住之后 Ctrl+C / Ctrl+V / Delete 都是对整块生效。 */
 $("#sheetWrap").addEventListener("mousedown", e => {
   const td = e.target.closest("td.sg-cell");
   if (!td) return;
+  const r = Number(td.dataset.r), c = Number(td.dataset.c);
+  const inp = e.target.closest("input.sg-input");
+  const s = normSel();
+  // 这一格已经是选中的那格、光标也在里面：这一下是想把光标点到某个字中间，
+  // 交给浏览器按默认处理（点哪儿光标去哪儿），别再全选一次。
+  if (inp && document.activeElement === inp && s &&
+      s.r1 === r && s.r2 === r && s.c1 === c && s.c2 === c) {
+    sheetDragging = false;
+    return;
+  }
   e.preventDefault();                       // 别让浏览器去选文字，我们自己框区域
   sheetDragging = true;
-  const r = Number(td.dataset.r), c = Number(td.dataset.c);
   SEL = { r1: r, c1: c, r2: r, c2: c };
   paintSel(true);
   updateSheetFoot();
@@ -2418,15 +2433,151 @@ document.addEventListener("mousemove", e => {
   const td = el && el.closest ? el.closest("td.sg-cell") : null;
   if (!td) return;
   SEL.r2 = Number(td.dataset.r); SEL.c2 = Number(td.dataset.c);
+  // 框住的是一整块（不止一格）就退出"正在打字"的状态 ——
+  // 这样 Delete / 方向键 / Ctrl+V 是对整块生效，而不是改某一格里的字。
+  if (SEL.r1 !== SEL.r2 || SEL.c1 !== SEL.c2) blurSheetInput();
   paintSel();
   updateSheetFoot();
 });
 document.addEventListener("mouseup", () => {
   if (!sheetDragging) return;
   sheetDragging = false;
-  if (SEL && SEL.r1 === SEL.r2 && SEL.c1 === SEL.c2) {
-    const inp = document.querySelector(`.sg-input[data-r="${SEL.r1}"][data-c="${SEL.c1}"]`);
-    if (inp) { inp.focus(); inp.select(); }
+  if (SEL && SEL.r1 === SEL.r2 && SEL.c1 === SEL.c2) sheetFocusCell(SEL.r1, SEL.c1);
+});
+function blurSheetInput() {
+  const a = document.activeElement;
+  if (a && a.classList && a.classList.contains("sg-input")) a.blur();
+}
+function sheetOpen() { return $("#sheetOverlay").classList.contains("show"); }
+function sheetFocusCell(r, c) {
+  const inp = document.querySelector(`.sg-input[data-r="${r}"][data-c="${c}"]`);
+  if (inp) { inp.focus(); inp.select(); }
+}
+/* 框住的那块导成 Excel 认识的格式：格子之间用 Tab，一行一行用回车。
+   单格复制出来的就是一个值，多格复制出来整块能直接贴回 Excel。 */
+function sheetSelText() {
+  const s = normSel();
+  if (!s) return "";
+  const out = [];
+  for (let r = s.r1; r <= s.r2; r++) {
+    const line = [];
+    for (let c = s.c1; c <= s.c2; c++) line.push(SHEET[r][c] == null ? "" : String(SHEET[r][c]));
+    out.push(line.join("\t"));
+  }
+  return out.join("\n");
+}
+function sheetSelCount() {
+  const s = normSel();
+  return s ? (s.r2 - s.r1 + 1) * (s.c2 - s.c1 + 1) : 0;
+}
+/* 粘贴从哪儿开始：框了就从框的左上角，没框就看光标停在哪一格。 */
+function sheetPasteAt() {
+  const s = normSel();
+  if (s) return { r: s.r1, c: s.c1 };
+  const a = document.activeElement;
+  if (a && a.classList && a.classList.contains("sg-input"))
+    return { r: Number(a.dataset.r), c: Number(a.dataset.c) };
+  return null;
+}
+function sheetPaste(text) {
+  const at = sheetPasteAt();
+  if (!at) return;
+  const lines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  if (lines.length && lines[lines.length - 1] === "") lines.pop();
+  const grid = lines.map(l => l.split("\t"));
+  const cols = grid.reduce((m, l) => Math.max(m, l.length), 0);
+  const res = fillCells(at.r, at.c, grid);
+  toast(res.dropped
+    ? `已粘进 ${res.rows} 行（超出的列丢掉了，只认前 4 列）`
+    : `已粘进 ${cols} 列 × ${res.rows} 行，框选要导的部分再点导入`);
+}
+function sheetClearSel() {
+  const s = normSel();
+  if (!s) return 0;
+  let n = 0;
+  for (let r = s.r1; r <= s.r2; r++) {
+    for (let c = s.c1; c <= s.c2; c++) {
+      if (SHEET[r][c]) n++;
+      SHEET[r][c] = "";
+      const el = document.querySelector(`.sg-input[data-r="${r}"][data-c="${c}"]`);
+      if (el) el.value = "";
+    }
+  }
+  queueSheetSave();
+  updateSheetFoot();
+  return n;
+}
+/* 不是编辑态时，方向键挪选中的格子（Excel 里也是这么走的） */
+function sheetMoveSel(dr, dc) {
+  const s = normSel();
+  if (!s) return;
+  const r = Math.max(0, Math.min(SHEET_ROWS - 1, s.r1 + dr));
+  const c = Math.max(0, Math.min(SHEET_COLS - 1, s.c1 + dc));
+  SEL = { r1: r, c1: c, r2: r, c2: c };
+  paintSel(true);
+  updateSheetFoot();
+  const td = document.querySelector(`#sheetWrap .sg-cell[data-r="${r}"][data-c="${c}"]`);
+  if (td && td.scrollIntoView) td.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+/* 复制：正在格子里挑了一截文字时，让浏览器去复制那截；否则复制框住的整块 */
+document.addEventListener("copy", e => {
+  if (!sheetOpen() || !SEL) return;
+  const a = document.activeElement;
+  if (a && a.classList && a.classList.contains("sg-input") &&
+      typeof a.selectionStart === "number" && a.selectionStart !== a.selectionEnd) return;
+  const txt = sheetSelText();
+  if (!txt) return;
+  e.preventDefault();
+  const dt = e.clipboardData || window.clipboardData;
+  if (dt && dt.setData) dt.setData("text/plain", txt);
+  const s = normSel();
+  toast(sheetSelCount() > 1
+    ? `已复制 ${s.c2 - s.c1 + 1} 列 × ${s.r2 - s.r1 + 1} 行`
+    : `已复制这格的内容`);
+});
+/* 粘贴：一个值、而且正在格子里打字 → 交给浏览器；其余（多格 / 对着框选区）自己填 */
+document.addEventListener("paste", e => {
+  if (!sheetOpen()) return;
+  const text = (e.clipboardData || window.clipboardData || {}).getData("text/plain") || "";
+  if (!text) return;
+  const a = document.activeElement;
+  const inCell = !!(a && a.classList && a.classList.contains("sg-input"));
+  const single = text.indexOf("\t") < 0 && text.indexOf("\n") < 0 && text.indexOf("\r") < 0;
+  if (single && inCell) return;              // 正常打字替换，浏览器自己会处理
+  if (!sheetPasteAt()) return;
+  e.preventDefault();
+  sheetPaste(text);
+});
+/* 键盘：在格子里打字时不抢；不在编辑态时，方向键挪格子、Delete 清空、回车进去改 */
+document.addEventListener("keydown", e => {
+  if (!sheetOpen() || !SEL) return;
+  const a = document.activeElement;
+  const inCell = !!(a && a.classList && a.classList.contains("sg-input"));
+  const otherEditable = !inCell && a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" ||
+                                        a.tagName === "SELECT" || a.isContentEditable);
+  if (otherEditable) return;                 // 焦点在标签框之类的地方，别抢键盘
+  if (inCell) {
+    if (e.key === "Escape") {
+      // 正在格子里改字时按 Esc = 退出编辑态（别把整个填表窗口关了 ——
+      // 页面里另有一个 "Esc 关弹窗" 的监听，这里先把它拦下来）
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      a.blur();
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      a.blur(); sheetMoveSel(1, 0); sheetFocusCell(SEL.r1, SEL.c1);
+    }
+    return;
+  }
+  const mv = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] }[e.key];
+  if (mv) { e.preventDefault(); sheetMoveSel(mv[0], mv[1]); return; }
+  if (e.key === "Delete" || e.key === "Backspace") {
+    e.preventDefault();
+    const n = sheetClearSel();
+    if (n) toast(`已清空选中的 ${n} 个格子`);
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    sheetFocusCell(SEL.r1, SEL.c1);
   }
 });
 $("#sheetWrap").addEventListener("input", e => {
@@ -2435,18 +2586,6 @@ $("#sheetWrap").addEventListener("input", e => {
   SHEET[Number(inp.dataset.r)][Number(inp.dataset.c)] = inp.value;
   updateSheetFoot();
   queueSheetSave();
-});
-$("#sheetWrap").addEventListener("paste", e => {
-  const inp = e.target.closest("input.sg-input");
-  if (!inp) return;
-  const text = (e.clipboardData || window.clipboardData || {}).getData("text/plain") || "";
-  if (text.indexOf("\t") < 0 && text.indexOf("\n") < 0) return;   // 单个值，交给浏览器默认粘贴
-  e.preventDefault();
-  const lines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
-  if (lines.length && lines[lines.length - 1] === "") lines.pop();
-  const res = fillCells(Number(inp.dataset.r), Number(inp.dataset.c), lines.map(l => l.split("\t")));
-  toast(res.dropped ? `已粘进 ${res.rows} 行（超出的列丢掉了，只认前 4 列）`
-                    : `已粘进 ${res.rows} 行，框选要导的部分再点导入`);
 });
 $("#sheetFile").onchange = async e => {
   const f = e.target.files[0];

@@ -147,7 +147,12 @@
   .modal-close:hover { background: #e5e7eb; color: #1f2937; }
   .modal-body { flex: 1 1 auto; overflow-y: auto; padding: 16px 22px 4px; }
   .modal-foot { flex: none; display: flex; justify-content: flex-end; gap: 8px; padding: 12px 22px 16px; border-top: 1px solid #f0f1f3; background: #fff; }
-  #toast { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); background: #1f2937; color: #fff; padding: 10px 20px; border-radius: 10px; font-size: 13px; display: none; z-index: 99; }
+  #toast { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); background: #1f2937; color: #fff; padding: 10px 20px; border-radius: 10px; font-size: 13px; display: none; z-index: 99; max-width: 78vw; line-height: 1.7; }
+  /* 和后台断线的横幅：一直挂在那儿，直到重新连上 */
+  #offlineBar { display: none; position: fixed; left: 0; right: 0; top: 0; z-index: 999;
+    background: #a32d2d; color: #fff; padding: 10px 16px; font-size: 13px; line-height: 1.8; text-align: center; }
+  #offlineBar button { margin-left: 10px; padding: 4px 12px; font-size: 13px; border: 0; border-radius: 6px;
+    background: #fff; color: #a32d2d; font-weight: 600; cursor: pointer; }
   .tabpane { display: none; } .tabpane.active { display: block; }
   .empty { text-align: center; color: #9ca3af; padding: 40px 0; font-size: 13px; }
   /* 表格里点一下就能改 */
@@ -274,6 +279,12 @@
 </style>
 </head>
 <body>
+<!-- 后台没在跑的时候，光弹一句 Failed to fetch 谁也看不懂，这里给一条说人话的横幅 -->
+<div id="offlineBar">
+  <span>⚠ <b>和软件后台断开连接了。</b>启动时那个<b>黑色窗口</b>是不是被关掉了？
+    重新双击一次 <b>Start.bat</b>，然后按 <b>F5</b> 刷新这个页面就好了。</span>
+  <button onclick="location.reload()">刷新页面</button>
+</div>
 <header>
   <h1>简历批量投递助手</h1>
   <div class="quota">今日已发 <b id="qToday">0</b> / 上限 <b id="qLimit">50</b> 封 <span id="qState" style="margin-left:10px;"></span></div>
@@ -846,9 +857,23 @@ function toast(msg, ok = true) {
   clearTimeout(t._h);
   t._h = setTimeout(() => t.style.display = "none", 2600);
 }
+/* 连不上后台时，浏览器只会给一句英文 "Failed to fetch" —— 谁也看不懂什么意思。
+   这里翻译成"黑色窗口关掉了、该怎么救"，并且挂一条一直看得见的横幅，
+   免得用户点了半天、每次只闪一下看不懂的红条。 */
+function offline(on) {
+  const el = $("#offlineBar");
+  if (el) el.style.display = on ? "block" : "none";
+}
 async function api(path, body) {
   const opt = body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {};
-  const r = await fetch(path, opt);
+  let r;
+  try {
+    r = await fetch(path, opt);
+  } catch (e) {
+    offline(true);
+    throw new Error("连不上软件后台了 —— 看页面顶部那条红色提示");
+  }
+  offline(false);
   const text = await r.text();
   try {
     return JSON.parse(text);

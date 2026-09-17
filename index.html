@@ -427,6 +427,11 @@
           <textarea id="tplBody" oninput="markTplDirty()" placeholder="尊敬的HR：&#10;&#10;您好！我是{学校}{姓名}，…"></textarea>
         </div>
         <div class="hint" style="margin:-4px 0 10px;">💡 框的右下角有两条小斜杠，按住它往下拖，框就变高（写长正文更舒服）；往上拖能缩回去。</div>
+        <div class="field">
+          <label>这套模板带哪些附件 <span class="hint">（选填。挑了几个之后，清单里选这套「投递定位」的条目，附件会跟着换成这几个）</span></label>
+          <div class="att-check" id="tplAttList"></div>
+          <div class="hint" id="tplAttHint" style="margin-top:6px; line-height:1.8;"></div>
+        </div>
         <div class="hint">可用的变量（点一下插入到光标处，发送时自动替换为每家公司的真实内容）：</div>
         <div class="chips">
           <span class="chip" onclick="insertVar('{公司}')">{公司}</span>
@@ -437,6 +442,7 @@
           <span class="chip" onclick="insertVar('{备注}')">{备注}</span>
         </div>
         <div class="hint">上面下拉里选哪套，就在编辑哪套。<b>新建</b>一套写别的话术（比如专投 AI 岗的），写完在「投递清单」的<b>投递定位</b>那一列挑给它。<br>
+          每套还能<b>关联附件</b>：比如「专业对口」这套挂简历+通用证明材料，清单里切成专业对口的条目，附件自动换成这两个。<br>
           个别公司要求不一样？不用改这里——在「投递清单」里点那家公司的「编辑」，可单独定制它的主题、正文和附件。</div>
         <div style="display:flex; gap:10px; margin-top:12px; align-items:center; flex-wrap:wrap;">
           <button class="btn primary" onclick="saveTemplate()">保存这套</button>
@@ -611,7 +617,13 @@
         <b>怎么用：</b>「投递清单」里有一列叫「<b>投递定位</b>」，每条挑一套；不挑的就跟随标着 ★ 的那套默认。<br>
         <b>改默认：</b>在「邮件模板」页选中某套，点「★ 设为默认」，以后新导入的清单就默认用它。<br>
         <span class="hint">某家公司还要更特殊？点它的「编辑」，在「这封邮件单独定制」里单独写——那里优先级最高。<br>
-        发送时会按每条自己的投递定位取话术，日志里也会写清楚这封用的是哪套，方便回头查。</span>
+        发送时会按每条自己的投递定位取话术，日志里也会写清楚这封用的是哪套，方便回头查。</span><br>
+        <b>🔗 还能顺手把附件也绑上：</b>比如「专业对口」这套绑 <b>简历 + 通用证明材料</b>，「AI岗」那套绑 <b>简历 + 作品集</b>。<br>
+        做法：「邮件模板」页选中某套 → 在「这套模板带哪些附件」里勾上要带的 → 点「保存这套」。<br>
+        之后在「投递清单」把某条的投递定位切成这套，它的附件<b>自动换成这几个</b>（原来勾的会被替换掉）；<br>
+        清单「附件」列显示「🔗 模板×2」的，就是跟着模板走的（点一下能看是哪几个）。<br>
+        <span class="hint">没给模板勾附件的（比如默认那套），附件还是照每条自己勾的发，行为跟以前一样。<br>
+        哪条想单独例外：点「编辑」自己勾几个，勾了就按你勾的走，不再跟模板。</span>
       </div>
       <div class="okbox" style="background:#f7f5fd; border-color:#ddd6f5;">
         🏷 <b>标签：公司一多，靠它分组</b><br>
@@ -706,8 +718,9 @@
     <div style="border-top:1px dashed #e5e7eb; margin:14px 0 10px; padding-top:12px;">
       <b style="font-size:13px; color:#0c447c;">投递定位（这家用哪套话术）</b>
       <div class="field" style="margin-top:8px;">
-        <select id="fTemplateSel"></select>
-        <div class="hint" style="margin-top:4px;">选「默认」就跟随「邮件模板」页里标着 ★ 的那套；想给这家单独用别的，在这儿挑。</div>
+        <select id="fTemplateSel" onchange="syncAttAll()"></select>
+        <div class="hint" style="margin-top:4px;">选「默认」就跟随「邮件模板」页里标着 ★ 的那套；想给这家单独用别的，在这儿挑。<br>
+          哪套在「邮件模板」页关联了附件（带 🔗），换成它之后，下面的附件会自动跟着换成对应的那几个。</div>
       </div>
     </div>
     <div style="border-top:1px dashed #e5e7eb; margin:14px 0 10px; padding-top:12px;">
@@ -1133,9 +1146,13 @@ function attMode(j) {
   if (m === "all" || m === "pick") return m;
   return (j && j.atts && j.atts.length) ? "pick" : "all";
 }
-/* 这条实际会发出哪几个附件（文件名列表）。 */
+/* 这条实际会发出哪几个附件（文件名列表）。
+   自己勾了就用自己勾的；一个没勾就看它那套「投递定位」模板关联了哪几个。 */
 function attOf(j) {
-  return attMode(j) === "all" ? (ATTS || []).map(a => a.name) : ((j && j.atts) || []);
+  if (attMode(j) === "all") return (ATTS || []).map(a => a.name);
+  const own = (j && j.atts) || [];
+  if (own.length) return own;
+  return tplLinkedAtts(j && j.template_id);
 }
 /* 附件那一列：直接写清这条会带几个附件。
    以前只写个灰灰的"全局"，看不出会发几个 —— 结果把给别家准备的压缩包也发出去了。 */
@@ -1143,6 +1160,7 @@ function attCell(j) {
   const mode = attMode(j);
   const picked = (j.atts || []).length;
   const all = (ATTS || []).length;
+  const linked = tplLinkedAtts(j && j.template_id);
   const custom = !!(j.subject_override || j.body_override || picked);
   const open = `style="cursor:pointer;" onclick="openAttList('${j.id}')"`;
   if (custom) {
@@ -1159,6 +1177,11 @@ function attCell(j) {
         `title="这条用的是「默认」话术 + 附件库里全部 ${all} 个附件，点一下看是哪几个">全局·${all}个</span>`
       : `<span style="color:#a32d2d;font-weight:600;" ${open} ` +
         `title="附件库里一个文件都没有，这样发出去是没有简历的！先去「发送设置」上传">⚠ 没附件</span>`;
+  }
+  if (linked.length) {
+    const tn = (j.template_id ? tplName(j.template_id) : dftLabel());
+    return `<span style="color:#185fa5;" ${open} ` +
+           `title="跟着「${esc(tn)}」这套投递定位带的 ${linked.length} 个附件，点一下看是哪几个">🔗 模板×${linked.length}</span>`;
   }
   return `<span style="color:#a32d2d;font-weight:600;" ${open} ` +
          `title="这条一个附件都没勾，发出去是不带简历的邮件。点一下看详情">⚠ 没勾附件</span>`;
@@ -1338,6 +1361,13 @@ function openEdit(id) {
 
    另一条：**默认一个都不勾**（att_mode=pick + 名单为空）。
    附件库里躺着好几份简历时，"默认全选"等于把给别家准备的材料一起发出去，这个默认不对。 */
+/* 编辑弹窗里当前选的那套「投递定位」，以及它关联的附件。
+   切换定位下拉时要重算提示，所以单独抽出来。 */
+function editTplLinked() {
+  const tid = $("#fTemplateSel") ? $("#fTemplateSel").value : "";
+  const t = tid ? tplById(tid) : defaultTpl();
+  return { name: t ? t.name : "", atts: (t && t.atts) || [] };
+}
 function syncAttAll() {
   const all = $("#fAttAll").checked;
   let n = 0;
@@ -1346,11 +1376,20 @@ function syncAttAll() {
     if (all) c.checked = true;
     if (c.checked) n++;
   });
-  $("#fAttHint").innerHTML = all
-    ? "✓ 会带上上面全部文件（以后新上传的也自动带上）。想只发其中几个，就把「跟着附件库走」的勾去掉。"
-    : (n
-        ? `只发你勾的这 ${n} 个。以后新上传的附件<b>不会</b>自动带给这家。`
-        : `<b style="color:#a32d2d;">现在一个都没勾</b> —— 这封邮件不会带任何附件（发送时会跳过这条并提示）。要发哪几个，在上面勾上。`);
+  const lk = editTplLinked();
+  let msg;
+  if (all) {
+    msg = "✓ 会带上上面全部文件（以后新上传的也自动带上）。想只发其中几个，就把「跟着附件库走」的勾去掉。";
+  } else if (n) {
+    msg = `只发你勾的这 ${n} 个。以后新上传的附件<b>不会</b>自动带给这家。`;
+  } else if (lk.atts.length) {
+    msg = `你一个都没勾 —— 那这条会按「<b>${esc(lk.name)}</b>」这套投递定位<b>关联的 ${lk.atts.length} 个附件</b>来发：` +
+          `${lk.atts.map(esc).join("、")}。<br>想只给这家特事特办，就在上面勾（勾了以你勾的为准）；` +
+          `想改这套的附件，去「邮件模板」页改。`;
+  } else {
+    msg = `<b style="color:#a32d2d;">现在一个都没勾</b> —— 这封邮件不会带任何附件（发送时会跳过这条并提示）。要发哪几个，在上面勾上。`;
+  }
+  $("#fAttHint").innerHTML = msg;
 }
 function chosenAtts() {
   if ($("#fAttAll").checked) return { att_mode: "all", atts: [] };   // all = 跟着附件库走
@@ -1366,7 +1405,7 @@ function renderEditAtts(job) {
     const checked = mode === "all" ? "checked" : (chosen.includes(a.name) ? "checked" : "");
     return `
     <label class="att-row">
-      <input type="checkbox" class="fatt" value="${esc(a.name)}" ${checked}>
+      <input type="checkbox" class="fatt" value="${esc(a.name)}" ${checked} onchange="syncAttAll()">
       <span class="att-main">
         <span class="att-name">${esc(a.name)}</span>
         ${a.note ? `<span class="att-note">备注：${esc(a.note)}</span>` : ``}
@@ -1394,8 +1433,10 @@ async function saveEdit() {
   };
   data.email = String(data.email || "").replace(/\s+/g, "");   // 邮箱里不该有空格/换行
   if (!data.email.includes("@")) return toast("收件邮箱格式不正确", false);
-  // 一个附件都没勾也允许保存（默认就是这个状态），但要说清楚，免得到发送时才发现
-  const noAtt = (ATTS || []).length > 0 && att.att_mode === "pick" && !att.atts.length;
+  // 一个附件都没勾也允许保存（默认就是这个状态），但要说清楚，免得到发送时才发现。
+  // 例外：这套「投递定位」关联了附件的话，不勾也会按模板关联的发，不用多嘴。
+  const noAtt = (ATTS || []).length > 0 && att.att_mode === "pick"
+    && !att.atts.length && !editTplLinked().atts.length;
   let dropped = 0;
   if (EDIT_ID) {
     const r = await api("/api/jobs/update", { id: EDIT_ID, ...data });
@@ -1464,20 +1505,71 @@ function renderTplPick() {
   const t = curTpl();
   $("#tplDftTag").style.display = (t && t.id === TPLS.default_id) ? "" : "none";
 }
+/* ---------- 模板 ↔ 附件 关联 ---------- */
+/* 这套模板关联的附件（按模板 id 取；传空就是默认那套）。 */
+function tplLinkedAtts(id) {
+  const t = id ? tplById(id) : defaultTpl();
+  return (t && t.atts) || [];
+}
+/* 模板页那个勾选框里，现在勾了哪几个。 */
+function chosenTplAtts() {
+  return [...document.querySelectorAll(".tplatt:checked")].map(c => c.value);
+}
+function attsKey(list) { return (list || []).join("\u0001"); }
+function renderTplAtts() {
+  const t = curTpl();
+  const chosen = (t && t.atts) || [];
+  const list = ATTS || [];
+  $("#tplAttList").innerHTML = list.length ? list.map(a => `
+    <label class="att-row">
+      <input type="checkbox" class="tplatt" value="${esc(a.name)}" ${chosen.includes(a.name) ? "checked" : ""} onchange="markTplDirty()">
+      <span class="att-main">
+        <span class="att-name">${esc(a.name)}</span>
+        ${a.note ? `<span class="att-note">备注：${esc(a.note)}</span>` : ``}
+      </span>
+      ${a.kind && a.kind !== "other"
+        ? `<button class="lnk att-pv" data-name="${esc(a.name)}" title="先看看是哪份文件"
+             onclick="event.preventDefault(); event.stopPropagation(); openPreview(this.dataset.name)">预览</button>`
+        : ""}
+      <span class="sz">${(a.size/1024).toFixed(0)} KB</span>
+    </label>`).join("")
+    : `<div class="empty" style="padding:14px 0;">附件库为空，先到「发送设置」上传</div>`;
+  updateTplAttHint();
+}
+function updateTplAttHint() {
+  const t = curTpl();
+  const chosen = chosenTplAtts();
+  if (!t) { $("#tplAttHint").innerHTML = ""; return; }
+  if (!chosen.length) {
+    $("#tplAttHint").innerHTML =
+      `现在<b>没关联附件</b>：清单里选这套定位的条目，附件还是按各自那条里勾的来（不勾就发不出去，发送前会提醒）。`;
+    return;
+  }
+  const missing = chosen.filter(n => !(ATTS || []).some(a => a.name === n));
+  $("#tplAttHint").innerHTML =
+    `已关联 <b>${chosen.length}</b> 个：${chosen.map(esc).join("、")}。<br>` +
+    `清单里把这套选成「投递定位」，附件就会自动换成这几个（原来勾的会被替换掉）。` +
+    `已经是这套定位的条目，也会跟着变。` +
+    (missing.length ? `<br><b style="color:#a32d2d;">注意：${missing.map(esc).join("、")} 在附件库里已经没有了，发送时会跳过这些条目并提示。</b>` : "");
+}
 function fillTplEditor() {
   const t = curTpl();
   $("#tplSubject").value = t ? (t.subject || "") : "";
   $("#tplBody").value = t ? (t.body || "") : "";
+  renderTplAtts();
   markTplDirty();
 }
 /* 编辑框里的字和"已经存下来的"不一样 = 有没保存的改动 */
 function tplDirty() {
   const t = curTpl();
   if (!t) return false;
-  return (t.subject || "") !== $("#tplSubject").value || (t.body || "") !== $("#tplBody").value;
+  return (t.subject || "") !== $("#tplSubject").value
+      || (t.body || "") !== $("#tplBody").value
+      || attsKey(t.atts) !== attsKey(chosenTplAtts());
 }
 function markTplDirty() {
   $("#tplDirty").style.display = tplDirty() ? "" : "none";
+  updateTplAttHint();
   renderPreview();
 }
 /* 切换/新建/切页签/开始投递之前，先把编辑框里的改动存掉，免得改了却没生效。
@@ -1486,8 +1578,10 @@ async function flushTpl(silent) {
   const t = curTpl();
   if (!t) return true;
   const subject = $("#tplSubject").value, body = $("#tplBody").value;
-  if ((t.subject || "") === subject && (t.body || "") === body) { markTplDirty(); return true; }
-  const r = await api("/api/template", { id: t.id, subject, body });
+  const atts = chosenTplAtts();
+  if ((t.subject || "") === subject && (t.body || "") === body
+      && attsKey(t.atts) === attsKey(atts)) { markTplDirty(); return true; }
+  const r = await api("/api/template", { id: t.id, subject, body, atts });
   if (!r || r.ok === false) {
     toast((r && r.error) || "话术没保存上，请按一下「保存这套」再试", false);
     return false;
@@ -1507,10 +1601,13 @@ async function switchTemplate(id) {
 }
 async function saveTemplate() {
   const t = curTpl(); if (!t) return;
-  const changed = (t.subject || "") !== $("#tplSubject").value || (t.body || "") !== $("#tplBody").value;
+  const changed = (t.subject || "") !== $("#tplSubject").value
+    || (t.body || "") !== $("#tplBody").value
+    || attsKey(t.atts) !== attsKey(chosenTplAtts());
   if (!(await flushTpl(true))) return;
   renderTplPick();
-  toast(changed ? `「${t.name}」已保存` : `「${t.name}」没有改动`);
+  const n = tplLinkedAtts(t.id).length;
+  toast(changed ? `「${t.name}」已保存${n ? `（关联了 ${n} 个附件）` : ""}` : `「${t.name}」没有改动`);
 }
 async function addTemplate() {
   await flushTpl(true);
@@ -1551,9 +1648,11 @@ async function delTemplate() {
   const t = curTpl(); if (!t) return;
   if ((TPLS.list || []).length <= 1) return toast("至少得留一套话术，不然邮件没内容可发", false);
   const used = JOBS.filter(j => j.template_id === t.id).length;
+  const n = (t.atts || []).length;
   if (!confirm(`删掉「${t.name}」这套话术？\n\n` +
-      (used ? `有 ${used} 条清单指着它，删掉后这 ${used} 条会回到「默认」，可以再手动改。\n\n` : "") +
-      `话术内容删了就找不回来了。`)) return;
+      (used ? `有 ${used} 条清单指着它，删掉后这 ${used} 条会回到「默认」，可以再手动改。\n` : "") +
+      (n ? `它关联的那 ${n} 个附件设置也一起没了。\n` : "") +
+      `\n话术内容删了就找不回来了。`)) return;
   const r = await api("/api/templates/delete", { id: t.id });
   if (!r.ok) return toast(r.error, false);
   TPLS = r.templates; TPL_CUR = TPLS.default_id;
@@ -1565,30 +1664,52 @@ async function delTemplate() {
 /* 清单里那条「投递定位」下拉 */
 function tplCell(j) {
   const cur = j.template_id || "";
-  const tip = cur ? `发送时用「${tplName(cur)}」这套话术`
-                  : `跟随默认：发送时用「${(defaultTpl() || {}).name || ""}」`;
+  const used = cur ? (tplById(cur) || {}) : (defaultTpl() || {});
+  const linked = (used.atts || []).length;
+  const tip = (cur ? `发送时用「${tplName(cur)}」这套话术` : `跟随默认：发送时用「${(defaultTpl() || {}).name || ""}」`)
+    + (linked ? `；这套关联了 ${linked} 个附件，切成它会自动换附件` : "");
   let html = `<select class="tpl-select" title="${esc(tip)}" onchange="setTpl('${j.id}', this.value)">`;
   html += `<option value=""${cur ? "" : " selected"}>${esc(dftLabel())}</option>`;
   (TPLS.list || []).forEach(t => {
-    html += `<option value="${t.id}"${cur === t.id ? " selected" : ""}>${esc(t.name)}</option>`;
+    const n = (t.atts || []).length;
+    html += `<option value="${t.id}"${cur === t.id ? " selected" : ""}>${esc(t.name)}${n ? " 🔗" + n : ""}</option>`;
   });
   return html + `</select>`;
 }
+/* 切换这条的投递定位。
+   模板要是关联了附件，就把这条原来勾的附件清掉、改成跟着那套模板走
+   —— 用户要的就是"换成专业对口，附件自动变成专业对口那两个"。 */
 async function setTpl(id, val) {
   const j = JOBS.find(x => x.id === id);
-  if (j) j.template_id = val;
-  const r = await api("/api/jobs/update", { id, template_id: val });
+  const linked = tplLinkedAtts(val);          // 传 "" 就是默认那套
+  const t = val ? tplById(val) : defaultTpl();
+  const data = { id, template_id: val };
+  if (linked.length) {
+    data.atts = [];                            // 先清空已有附件
+    data.att_mode = "pick";                    // 再让附件跟着这套模板的关联走
+  }
+  if (j) {
+    j.template_id = val;
+    if (linked.length) { j.atts = []; j.att_mode = "pick"; }
+  }
+  const r = await api("/api/jobs/update", data);
   if (!r.ok) return toast(r.error, false);
   renderJobs();
   renderPreview();
-  toast(`投递定位改成：${val ? tplName(val) : "默认"}`);
+  const nm = val ? (t ? t.name : "默认") : "默认";
+  toast(linked.length
+    ? `投递定位改成：${nm}，附件已换成这套关联的 ${linked.length} 个`
+    : `投递定位改成：${nm}（这套没关联附件，附件没动）`);
 }
 function renderEditTpl(job) {
   const cur = (job && job.template_id) || "";
+  const dft = defaultTpl() || {};
+  const dn = (dft.atts || []).length;
+  const mark = t => { const n = (t.atts || []).length; return n ? ` 🔗${n}` : ""; };
   $("#fTemplateSel").innerHTML =
-    `<option value=""${cur ? "" : " selected"}>默认（${esc((defaultTpl() || {}).name || "")}）</option>` +
+    `<option value=""${cur ? "" : " selected"}>默认（${esc(dft.name || "")}${dft.name ? mark({ atts: dft.atts }) : ""}）</option>` +
     (TPLS.list || []).map(t =>
-      `<option value="${t.id}"${cur === t.id ? " selected" : ""}>${esc(t.name)}</option>`).join("");
+      `<option value="${t.id}"${cur === t.id ? " selected" : ""}>${esc(t.name)}${mark(t)}</option>`).join("");
 }
 function insertVar(v) {
   const el = document.activeElement === $("#tplBody") ? $("#tplBody") : $("#tplSubject");
@@ -1775,7 +1896,7 @@ async function uploadAtt() {
     const b64 = await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result.split(",")[1]); fr.readAsDataURL(f); });
     const r = await api("/api/attachments", { name: f.name, data: b64 });
     if (!r.ok) return toast(r.error, false);
-    ATTS = r.attachments; renderAtt(ATTS);
+    ATTS = r.attachments; renderAtt(ATTS); renderTplAtts();
   }
   $("#attInput").value = ""; toast("附件已上传"); renderPreview();
 }
@@ -1783,7 +1904,7 @@ async function delAtt(btn) {
   const name = btn.dataset.name;
   if (!confirm(`确定删除附件「${name}」？`)) return;
   const r = await api("/api/attachments/delete", { name });
-  ATTS = r.attachments || []; renderAtt(ATTS); renderPreview();
+  ATTS = r.attachments || []; renderAtt(ATTS); renderTplAtts(); renderPreview();
 }
 
 /* ---------- 附件在线预览 ---------- */
@@ -1839,6 +1960,11 @@ function openAttList(jobId) {
     head.push(`<div class="hint" style="margin-bottom:10px;">这条走的是「跟着附件库走」，` +
               `会带上附件库里的<b>全部 ${chosen.length} 个文件</b>。只想发其中几个，` +
               `就点这条的「编辑」，把「跟着附件库走」的勾去掉、自己勾要发的。</div>`);
+  } else if (!(j.atts || []).length) {
+    const tn = j.template_id ? tplName(j.template_id) : dftLabel();
+    head.push(`<div class="hint" style="margin-bottom:10px;">这 ${chosen.length} 个是「<b>${esc(tn)}</b>」` +
+              `这套投递定位<b>关联的附件</b>。<br>要给这家单独换别的，点这条的「编辑」自己勾；` +
+              `想整套一起改，去「邮件模板」页改这套的附件关联。</div>`);
   }
   $("#attListBody").innerHTML = head.join("") + (chosen.length ? chosen.map(n => {
     const a = (ATTS || []).find(x => x.name === n);

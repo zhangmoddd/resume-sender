@@ -205,12 +205,17 @@ def _new_tpl_id():
 
 
 def _clean_tpl(t):
-    """把一套模板收拾成固定格式，坏数据一律换成安全值。"""
+    """把一套模板收拾成固定格式，坏数据一律换成安全值。
+
+    atts = 这套模板关联的附件（文件名列表）。空列表 = 没关联，
+    这时清单条目的附件照旧由它自己那份名单决定，升级上来的老数据不受影响。
+    """
     return {
         "id": str(t.get("id") or _new_tpl_id()),
         "name": (str(t.get("name") or "").strip() or DEFAULT_TPL_NAME)[:30],
         "subject": str(t.get("subject") or ""),
         "body": str(t.get("body") or ""),
+        "atts": norm_atts(t.get("atts")),
     }
 
 
@@ -235,7 +240,8 @@ def get_templates():
     clean = [_clean_tpl(t) for t in d.get("list", []) if isinstance(t, dict)]
     if not clean:
         clean = [{"id": "t1", "name": DEFAULT_TPL_NAME,
-                  "subject": DEFAULT_TEMPLATE["subject"], "body": DEFAULT_TEMPLATE["body"]}]
+                  "subject": DEFAULT_TEMPLATE["subject"], "body": DEFAULT_TEMPLATE["body"],
+                  "atts": []}]
     default_id = str(d.get("default_id") or "")
     if default_id not in [t["id"] for t in clean]:
         default_id = clean[0]["id"]
@@ -256,6 +262,29 @@ def find_template(tpls, tid):
 def template_for_job(job, tpls):
     """这条投递目标该用哪套话术：它自己指定的 > 默认那套。"""
     return find_template(tpls, str((job or {}).get("template_id") or ""))
+
+
+def tpl_linked_atts(tpl):
+    """这套模板关联了哪些附件（没关联返回空列表）。"""
+    return norm_atts((tpl or {}).get("atts"))
+
+
+def tpl_atts_for_job(job, tpls=None):
+    """这条投递目标用的那套模板，关联了哪几个附件。"""
+    return tpl_linked_atts(template_for_job(job, tpls or get_templates()))
+
+
+def picked_atts(job):
+    """pick 模式下这条实际要发哪几个文件。
+
+    先看这条自己勾的；自己一个都没勾，就跟着它那套「投递定位」模板关联的附件走
+    —— 这样在模板页改一次关联，所有用这套的清单条目跟着变，不用一条条重新勾。
+    返回空列表 = 一个都不发（发送前会被拦下来提醒）。
+    """
+    chosen = norm_atts((job or {}).get("atts"))
+    if chosen:
+        return chosen
+    return tpl_atts_for_job(job)
 
 
 def tpl_display_name(job, tpls):
@@ -881,12 +910,13 @@ def resolve_attachments(job):
     """按投递目标解析附件。
 
     att_mode=all  -> 发附件库里全部
-    att_mode=pick -> 只发 atts 里点名的（按勾选顺序）；名单为空 = 一个都不发
+    att_mode=pick -> 发 picked_atts()：自己勾的那几个；自己没勾就跟着所用模板关联的附件
+                     两边都空 = 一个都不发
     """
     all_atts = list_attachments()
     if att_mode_of(job) == "all":
         return all_atts
-    chosen = [str(x) for x in norm_atts((job or {}).get("atts"))]
+    chosen = picked_atts(job)
     if not chosen:
         return []
     keep = set(chosen)
@@ -907,12 +937,19 @@ def attachment_problem(job):
         if not have:
             return "附件库里一个文件都没有，请先到「发送设置」上传简历"
         return ""
-    chosen = norm_atts((job or {}).get("atts"))
+    own = norm_atts((job or {}).get("atts"))
+    chosen = own or tpl_atts_for_job(job)
     if not chosen:
         return ("这条一个附件都没勾，发出去会是一封不带简历的邮件。"
                 "点它的「编辑」勾上要发的文件，或者勾上「跟着附件库走」")
     missing = [n for n in chosen if n not in have]
     if missing:
+        if not own:
+            # 附件来自模板关联，报错时点名是哪套模板，用户才知道去哪儿改
+            t = template_for_job(job, get_templates())
+            return ("投递定位「%s」关联的附件在附件库里找不到：%s（被删掉或改过名了？）"
+                    "到「邮件模板」页改这套的附件关联，或点这条的「编辑」单独勾。"
+                    % (t.get("name", ""), "、".join(missing[:3])))
         return "指定的附件在附件库里找不到：%s（被删掉或改过名了？）" % "、".join(missing[:3])
     return ""
 
@@ -1570,6 +1607,9 @@ class Handler(BaseHTTPRequestHandler):
                     t["body"] = str(body["body"])
                 if "name" in body:
                     t["name"] = (str(body["name"]).strip() or t["name"])[:30]
+                if "atts" in body:
+                    # 这套模板关联的附件：清单里选这套定位的条目，附件就跟着变
+                    t["atts"] = norm_atts(body.get("atts"))
                 save_templates(tpls)
                 self._json({"ok": True, "templates": tpls})
             elif path == "/api/templates/add":
@@ -1587,6 +1627,7 @@ class Handler(BaseHTTPRequestHandler):
                     "name": name,
                     "subject": str(body.get("subject") or DEFAULT_TEMPLATE["subject"]),
                     "body": "",
+                    "atts": norm_atts(body.get("atts")),
                 }
                 tpls["list"].append(new)
                 save_templates(tpls)
